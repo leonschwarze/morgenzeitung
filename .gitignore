@@ -1,0 +1,13 @@
+# Nutzerdaten gehören nicht ins Repo – sie liegen in ~/.config und ~/.local/share.
+# Die Einträge hier sind ein Sicherheitsnetz, falls doch noch etwas im Programmordner liegt.
+config.toml
+*.log
+ausgaben/
+zeit/
+cookies/
+*.epub
+
+# Python
+.venv/
+__pycache__/
+.pytest_cache/

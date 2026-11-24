@@ -23,6 +23,7 @@ die ZEIT aus der EPUB-Ausgabe, die dein Abo dir ohnehin per Mail schickt.
 | `zeit.py` | ZEIT-Ausgabe aus dem Postfach holen, zerlegen, zwei Longreads pro Tag wählen |
 | `config.toml` | Quellen, Lesezeit, Titel |
 | `crontab.example` | startet das Programm jeden Morgen |
+| `umzug.sh` | einmaliger Umzug der Nutzerdaten aus dem Programmordner |
 | `morgenzeitung-web.service` | Mini-Webserver, über den der Tolino die Datei lädt |
 | `tests/` | Offline-Tests mit erfundenen Feeds |
 
@@ -55,7 +56,7 @@ Rotation von vorn. Eine Ausgabe reicht damit locker für die ganze Woche.
   Morgen nur lesend ins Postfach und holt neue `.epub`-Anhänge vom Absender `zeit.de`.
   Nimm ein App-Passwort, wenn dein Mailanbieter das anbietet, und schütze die Datei:
   `chmod 600 ~/.config/morgenzeitung/imap-passwort`.
-- *Von Hand:* Die EPUB-Datei einfach nach `~/morgenzeitung/zeit/` kopieren.
+- *Von Hand:* Die EPUB-Datei einfach nach `~/.local/share/morgenzeitung/zeit/` kopieren.
 
 **Lesezeit:** Mit `zaehlt_zur_lesezeit = true` werden die Longreads auf die 20 Minuten
 angerechnet, und es kommen entsprechend weniger Nachrichten. Ein Drittel des Budgets bleibt immer
@@ -65,22 +66,38 @@ für Nachrichten reserviert. Mit `false` kommen die Longreads obendrauf.
 
 ```bash
 .venv/bin/python -c "import zeit; [print(a['woerter'], a['ressort'], '|', a['titel']) \
-  for a in zeit.artikel_lesen(__import__('pathlib').Path('zeit/DATEINAME.epub'))]"
+  for a in zeit.artikel_lesen(__import__('pathlib').Path.home() / '.local/share/morgenzeitung/zeit/DATEINAME.epub')]"
 ```
 
 Damit siehst du, ob Titel, Ressorts und Wortzahlen sinnvoll erkannt werden. Falls nicht, schick
 mir die Ausgabe dieses Befehls (nicht das EPUB selbst), dann passe ich die Zerlegung an.
 
+## Wo was liegt
+
+Programm und deine Daten sind getrennt. So kannst du das Programm jederzeit mit `git pull`
+aktualisieren, ohne dass deine Einstellungen oder Ausgaben angefasst werden.
+
+| Ort | Inhalt | Wer ändert es? |
+|---|---|---|
+| `~/morgenzeitung/` | Programm (das git-Repo) und `.venv` | `git pull` |
+| `~/.config/morgenzeitung/` | `config.toml`, `imap-passwort` | du |
+| `~/.local/share/morgenzeitung/` | `ausgaben/`, `zeit/`, `morgenzeitung.log` | das Programm |
+
+Das ist die übliche Linux-Konvention (XDG): Einstellungen unter `~/.config`, Daten unter
+`~/.local/share`. Die `.gitignore` im Repo sorgt zusätzlich dafür, dass `config.toml`, Logs und
+EPUBs nie aus Versehen ins Repo geraten.
+
 ## Installation auf dem Pi (einmalig, ca. 15 Minuten)
 
 ```bash
-sudo apt install python3-venv fonts-dejavu-core
-# Archiv auf den Pi kopieren und entpacken, dann:
+sudo apt install git python3-venv fonts-dejavu-core
+git clone https://github.com/leonschwarze/morgenzeitung.git ~/morgenzeitung
 cd ~/morgenzeitung
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-cp config.example.toml config.toml
-.venv/bin/python -m pytest -q          # sollte "11 passed" melden
+mkdir -p ~/.config/morgenzeitung
+cp config.example.toml ~/.config/morgenzeitung/config.toml   # dann anpassen
+.venv/bin/python -m pytest -q          # sollte "12 passed" melden
 ```
 
 **Erster Lauf von Hand:**
@@ -88,20 +105,53 @@ cp config.example.toml config.toml
 ```bash
 .venv/bin/python morgenzeitung.py --nur-feeds   # Kommen die Feeds an? (schnell)
 .venv/bin/python morgenzeitung.py               # Zeitung bauen
-ls ~/morgenzeitung/ausgaben/                    # EPUB + index.html da?
+ls ~/.local/share/morgenzeitung/ausgaben/       # EPUB + index.html da?
 ```
 
 Im Log steht pro Artikel ✓ mit Wortzahl oder ✗ mit Grund, am Ende die geschätzte Lesezeit.
 
-**Webserver einrichten:**
+**Webserver einrichten** (als Benutzer-Dienst, Anleitung auch oben in der Datei):
 
 ```bash
-sudo cp morgenzeitung-web.service /etc/systemd/system/
-sudo systemctl enable --now morgenzeitung-web
-hostname -I                                     # zeigt die IP des Pi, z. B. 192.168.178.40
+mkdir -p ~/.config/systemd/user
+ln -sf ~/morgenzeitung/morgenzeitung-web.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now morgenzeitung-web
+sudo loginctl enable-linger $USER    # damit der Dienst auch nach einem Neustart ohne Login läuft
+hostname -I                          # zeigt die IP des Pi, z. B. 192.168.178.40
 ```
 
 **Jeden Morgen automatisch:** `crontab -e` und die Zeile aus `crontab.example` einfügen.
+
+## Aktualisieren
+
+```bash
+cd ~/morgenzeitung
+git pull
+.venv/bin/pip install -r requirements.txt      # nur nötig, wenn neue Pakete dazukamen
+.venv/bin/python -m pytest -q
+systemctl --user daemon-reload && systemctl --user restart morgenzeitung-web   # falls die .service-Datei sich geändert hat
+```
+
+Neue Optionen in `config.example.toml` übernimmst du von Hand in deine `config.toml`. Fehlt eine
+Option, nimmt das Programm den Standardwert. Ein schneller Vergleich:
+`diff ~/.config/morgenzeitung/config.toml config.example.toml`
+
+## Umzug von der alten Struktur (einmalig)
+
+Wenn `config.toml`, `ausgaben/` und `zeit/` noch im Programmordner liegen:
+
+```bash
+cd ~/morgenzeitung
+sh umzug.sh                                  # verschiebt Daten, passt Pfade in config.toml an
+crontab -e                                   # alte Zeile durch die aus crontab.example ersetzen
+sudo systemctl disable --now morgenzeitung-web          # alten System-Dienst stoppen …
+sudo rm /etc/systemd/system/morgenzeitung-web.service   # … und entfernen
+sudo systemctl daemon-reload
+```
+
+Danach den Webserver wie unter *Installation* als Benutzer-Dienst einrichten. Das Lesezeichen am
+Tolino bleibt gültig, weil sich Adresse und Port nicht ändern.
 
 ## Am Tolino
 
@@ -120,7 +170,7 @@ IPv4-Adresse zuweisen“), sonst ist das Lesezeichen irgendwann tot.
 | WDR liefert zu wenig | Stichwörter in `nur_mit` ergänzen – oder einen eigenen Rheinland-Feed suchen (siehe Übung 2) |
 | ZEIT: „kopiergeschützt (DRM)“ | Diese Ausgabe lässt sich nicht zerlegen → beim Abo das DRM-freie EPUB wählen, falls angeboten |
 | Zeitung zu kurz/lang | `lesezeit_minuten` oder `artikel` pro Quelle anpassen |
-| Tolino findet die Seite nicht | Pi und Tolino im selben WLAN? `systemctl status morgenzeitung-web` |
+| Tolino findet die Seite nicht | Pi und Tolino im selben WLAN? `systemctl --user status morgenzeitung-web` |
 
 ## Übungen zum Vertiefen
 

@@ -1,17 +1,24 @@
 # Kleiner Webserver, über den der Tolino die Zeitung lädt.
-# Installation:
-#   sudo cp morgenzeitung-web.service /etc/systemd/system/
-#   sudo systemctl enable --now morgenzeitung-web
-# Benutzername (pi) und Pfade ggf. anpassen.
+# Läuft als *Benutzer*-Dienst: kein sudo für den Dienst selbst, kein fester Benutzername
+# (%h steht für dein Home-Verzeichnis).
+#
+# Einrichten (einmalig):
+#   mkdir -p ~/.config/systemd/user
+#   ln -sf ~/morgenzeitung/morgenzeitung-web.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now morgenzeitung-web
+#   sudo loginctl enable-linger $USER     # Dienst läuft auch ohne Anmeldung, z. B. nach Neustart
+#
+# Durch den Link (ln -s) gilt nach jedem "git pull" automatisch die neue Version
+# (danach: systemctl --user daemon-reload && systemctl --user restart morgenzeitung-web).
 
 [Unit]
 Description=Morgenzeitung – Download-Seite fuer den Tolino
-After=network-online.target
 
 [Service]
-User=pi
-ExecStart=/usr/bin/python3 -m http.server 8080 --directory /home/pi/morgenzeitung/ausgaben
+ExecStartPre=/bin/mkdir -p %h/.local/share/morgenzeitung/ausgaben
+ExecStart=/usr/bin/python3 -m http.server 8080 --directory %h/.local/share/morgenzeitung/ausgaben
 Restart=on-failure
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target

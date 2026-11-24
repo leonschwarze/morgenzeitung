@@ -139,3 +139,24 @@ def test_nur_mit_filter(tmp_path):
     cfg["quelle"][0]["nur_mit"] = ["eins"]
     kand = mz.kandidaten_sammeln(cfg, netz)
     assert [a.titel for a in kand["GA"]] == ["GA eins"]
+
+
+def test_config_suchreihenfolge(tmp_path, monkeypatch):
+    """--config schlägt Umgebungsvariable, die schlägt ~/.config."""
+    a, b, c = tmp_path / "a.toml", tmp_path / "b.toml", tmp_path / "home.toml"
+    for p in (a, b, c):
+        p.write_text("")
+    monkeypatch.setattr(mz, "KONFIG_ORDNER", tmp_path / "leer")
+    monkeypatch.delenv("MORGENZEITUNG_CONFIG", raising=False)
+    monkeypatch.setattr(mz, "HIER", tmp_path / "programm")
+    try:
+        mz.config_finden()
+        assert False, "ohne Konfiguration muss es eine klare Fehlermeldung geben"
+    except SystemExit as e:
+        assert "config.example.toml" in str(e)
+    (tmp_path / "leer").mkdir()
+    c.rename(tmp_path / "leer" / "config.toml")
+    assert mz.config_finden() == tmp_path / "leer" / "config.toml"
+    monkeypatch.setenv("MORGENZEITUNG_CONFIG", str(b))
+    assert mz.config_finden() == b
+    assert mz.config_finden(str(a)) == a

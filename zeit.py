@@ -38,7 +38,7 @@ NS = {"opf": "http://www.idpf.org/2007/opf", "c": "urn:oasis:names:tc:opendocume
 def standard(cfg: dict) -> dict:
     z = cfg.setdefault("zeit", {})
     z.setdefault("aktiv", False)
-    z.setdefault("ordner", "~/morgenzeitung/zeit")
+    z.setdefault("ordner", "~/.local/share/morgenzeitung/zeit")
     z.setdefault("pro_tag", 2)
     z.setdefault("min_woerter", 1000)
     z.setdefault("max_woerter", 2500)
