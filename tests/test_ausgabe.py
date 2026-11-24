@@ -175,3 +175,38 @@ def test_sz_seite_drei_immer_und_kein_lokalteil(tmp_path):
     assert len(titel) == 5
     assert {"Bundestag beschließt Haushalt", "Zinsen sinken"} <= set(titel)
     assert not {"Neue Tram für Schwabing", "Landtag streitet"} & set(titel)
+
+
+def test_teaser_doppelt_mit_textanfang():
+    """Teaser, die den Textanfang wiederholen, fliegen raus – ein echter Vorspann bleibt."""
+    teile = ["<p><strong>Die Koalition ringt um den Haushalt. Was das für die Länder bedeutet …</strong></p>",
+             '<figure class="bild"><img src="BILD:0" alt=""/></figure>',
+             "<p>Die Koalition ringt um den Haushalt. Was das für die Länder bedeutet, zeigt sich "
+             "schon jetzt in den Kommunen.</p>",
+             "<p>Zweiter Absatz.</p>"]
+    ergebnis = zeit.doppelten_anfang_entfernen(teile)
+    assert len(ergebnis) == 3 and ergebnis[0].startswith("<figure")
+
+    eigenstaendig = ["<p>Ein Vorspann, der etwas anderes sagt als der Text darunter.</p>",
+                     "<p>Am Dienstag trafen sich die Abgeordneten im Plenum.</p>"]
+    assert zeit.doppelten_anfang_entfernen(eigenstaendig) == eigenstaendig
+    # kurze Zeilen (Dachzeilen, Ortsmarken) nie entfernen
+    assert zeit.doppelten_anfang_entfernen(["<p>Berlin</p>", "<p>Berlin – Am Dienstag …</p>"]) == \
+        ["<p>Berlin</p>", "<p>Berlin – Am Dienstag …</p>"]
+
+
+def test_teaser_im_epub(tmp_path):
+    sz = {"Politik": [("Haushalt", 600)]}
+    datei = mini_ausgabe(tmp_path, "SZ.epub", sz)
+    import zipfile
+    neu = tmp_path / "SZ2.epub"
+    satz = "Die Koalition ringt um den Haushalt und die Länder warten auf Klarheit."
+    with zipfile.ZipFile(datei) as a, zipfile.ZipFile(neu, "w") as b:
+        for info in a.infolist():
+            daten = a.read(info)
+            if info.filename.endswith("r0a0.xhtml"):
+                daten = daten.replace(b'<p class="vorspann">',
+                                      f'<p class="teaser">{satz}</p><p>{satz} Weiter im Text.</p><p class="vorspann">'.encode())
+            b.writestr(info, daten)
+    html_text = zeit.artikel_lesen(neu)[0]["html"]
+    assert html_text.count("Die Koalition ringt") == 1

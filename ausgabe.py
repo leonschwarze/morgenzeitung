@@ -249,7 +249,38 @@ def _saeubern(body, bild_lesen=None) -> tuple[str, list[tuple[bytes, str]]]:
         if innen:
             tag = "p" if name == "li" else name
             teile.append(f"<{tag}>{innen}</{tag}>")
-    return "\n".join(teile), roh
+    return "\n".join(doppelten_anfang_entfernen(teile)), roh
+
+
+def _klartext(block: str) -> str:
+    """Nur Buchstaben und Ziffern, klein – damit Satzzeichen, Hervorhebungen
+    und ein abschließendes "…" den Vergleich nicht stören."""
+    text = re.sub(r"<[^>]+>", " ", block)
+    return re.sub(r"\W+", " ", html.unescape(text)).strip().lower()
+
+
+def doppelten_anfang_entfernen(teile: list[str]) -> list[str]:
+    """Entfernt Teaser, deren Text gleich danach noch einmal kommt.
+
+    Viele Zeitungs-EPUBs setzen über den Artikel einen Teaser, und der Artikel
+    beginnt mit genau diesen Sätzen. Ein Block gilt als doppelt, wenn sein Anfang
+    (die ersten 80 Zeichen, mindestens aber 30) wörtlich am Anfang des
+    folgenden Texts steht. Geprüft wird nur ganz oben im Artikel (erste 4 Blöcke),
+    damit ein echtes Zitat weiter unten nie verschwindet."""
+    ergebnis = list(teile)
+    i = 0
+    while i < min(4, len(ergebnis) - 1):
+        if ergebnis[i].startswith("<figure"):
+            i += 1
+            continue
+        teaser = _klartext(ergebnis[i])
+        rest = " ".join(_klartext(t) for t in ergebnis[i + 1:i + 4] if not t.startswith("<figure"))
+        vergleich = teaser[:80]
+        if len(vergleich) >= 30 and rest.startswith(vergleich):
+            del ergebnis[i]
+            continue
+        i += 1
+    return ergebnis
 
 
 def artikel_lesen(pfad: Path) -> list[dict]:
