@@ -47,7 +47,7 @@ STANDARDS = {
         "min_woerter": 1000,
         "max_woerter": 2500,
         "zaehlt_zur_lesezeit": True,
-        "immer": [],
+        "immer": ["Dossier"],       # einmal pro Ausgabe, egal wie lang (danach ist es "verbraucht")
         "ressorts_bevorzugt": ["Dossier", "Politik", "Wirtschaft"],
         "ressorts_ausschliessen": ["Hamburg", "Osten", "Schweiz"],
         "ausschliessen": ["Leserbrief", "Impressum", "Inhalt", "Rätsel", "Kreuzwort", "Anzeige",
@@ -185,6 +185,50 @@ def _inline(el) -> str:
     return innen.strip()
 
 
+KOPF = {   # Klassennamen, an denen die Teile des Artikelkopfs zu erkennen sind
+    "dachzeile": re.compile(r"kicker|supertitle|dachzeile|overline|topline", re.I),
+    "vorspann": re.compile(r"header__text|subtitle|teaser|\blead\b|intro|vorspann|summary|"
+                           r"standfirst|abstract", re.I),
+    "autor": re.compile(r"author|byline|autor", re.I),
+}
+UEBERSCHRIFT = re.compile(r"headline|(?<!sub)(?<!super)(?<!sub-)title", re.I)
+ORTSMARKE = re.compile(r"paragraph__mark|ortsmarke|dateline|location", re.I)
+NAVIGATION = re.compile(r"\bnav|navigation", re.I)
+
+
+def _kopf_auslesen(body, titel: str) -> dict:
+    """Holt Dachzeile, Vorspann und Autor aus dem Artikelkopf und entfernt den Kopf
+    aus dem Text – sonst stünden Überschrift und Vorspann doppelt in der Zeitung.
+
+    SZ und ZEIT markieren die Teile mit Klassennamen, z. B.
+      SZ:   c-article-header__kicker, …__headline, …__text, …__author
+      ZEIT: supertitle, title, subtitle, author
+    Navigation ("Übersicht Feuilleton", "nächster Artikel") fliegt ebenfalls raus."""
+    for el in list(body.iter()):
+        if isinstance(el.tag, str) and el.getparent() is not None and NAVIGATION.search(el.get("class", "")):
+            el.drop_tree()
+    kopf = {"dachzeile": "", "vorspann": "", "autor": ""}
+    for feld, muster in KOPF.items():
+        for el in body.iter():
+            if not isinstance(el.tag, str) or not muster.search(el.get("class", "")):
+                continue
+            if feld != "dachzeile" and UEBERSCHRIFT.search(el.get("class", "")):
+                continue
+            text = " ".join(el.text_content().split())
+            if text and len(text) < 700:
+                kopf[feld] = text
+                el.drop_tree()
+                break
+    kopf["autor"] = re.sub(r"^(von|by|par)\s+", "", kopf["autor"], flags=re.I)
+    # Überschrift entfernen: h1, oder ein Element mit "headline"/"title" in der Klasse
+    for el in list(body.iter()):
+        if not isinstance(el.tag, str) or el.getparent() is None:
+            continue
+        if el.tag == "h1" or UEBERSCHRIFT.search(el.get("class", "")):
+            el.drop_tree()
+    return kopf
+
+
 def _saeubern(body, bild_lesen=None) -> tuple[str, list[tuple[bytes, str]]]:
     """Behält Absätze, Zwischentitel, Hervorhebungen, Zitatblöcke und Bilder mit
     Unterschrift – alles in einheitlicher, schlichter Form. So sieht jeder Artikel
@@ -194,6 +238,12 @@ def _saeubern(body, bild_lesen=None) -> tuple[str, list[tuple[bytes, str]]]:
     import bilder
     for el in body.xpath(".//script|.//style|.//svg|.//aside|.//nav|.//h1"):
         el.drop_tree()
+    # Ortsmarke ("Berlin – …"): Die SZ setzt den Gedankenstrich per CSS, den wir nicht übernehmen
+    for el in body.iter("span"):
+        if ORTSMARKE.search(el.get("class", "")):
+            el.tag = "strong"
+            el.attrib.clear()
+            el.tail = " – " + (el.tail or "").lstrip()
 
     # 1. Bilder durch Platzhalter-Elemente <bild> ersetzen (eins pro Figur)
     roh = []
@@ -303,6 +353,10 @@ def artikel_lesen(pfad: Path) -> list[dict]:
             body = baum.find(".//body")
             if body is None:
                 continue
+            # Nur Einträge ohne Unterpunkte im Inhaltsverzeichnis sind Artikel. Ressort-
+            # Übersichten (eine Seite voller Teaser), Titelseite und Register fallen so weg.
+            if toc and datei not in toc:
+                continue
             ueberschrift = body.xpath("(.//h1|.//h2)[1]")
             titel, ressort = toc.get(datei, ("", ""))
             titel = titel or (ueberschrift[0].text_content().strip() if ueberschrift else "")
@@ -312,10 +366,11 @@ def artikel_lesen(pfad: Path) -> list[dict]:
                 pfad = posixpath.normpath(posixpath.join(ordner, unquote(src.split("#")[0])))
                 return zf.read(pfad) if pfad in namen else None
 
+            kopf = _kopf_auslesen(body, titel)
             text, bilder_roh = _saeubern(body, bild_lesen)
             woerter = len(re.sub(r"<figcaption>.*?</figcaption>|<[^>]+>", " ", text, flags=re.S).split())
             artikel.append({"id": datei, "titel": re.sub(r"\s+", " ", titel), "ressort": ressort,
-                            "html": text, "woerter": woerter, "bilder_roh": bilder_roh})
+                            "html": text, "woerter": woerter, "bilder_roh": bilder_roh, **kopf})
     return artikel
 
 
@@ -374,8 +429,12 @@ def auswahl_fuer_heute(z: dict, status_datei: Path, heute: str) -> list[dict]:
     bevorzugt = [a for a in laenge_ok if _passt(a["ressort"], z["ressorts_bevorzugt"])]
     andere = [a for a in laenge_ok if a not in bevorzugt]
     rang = {r.lower(): i for i, r in enumerate(z["ressorts_bevorzugt"])}
-    bevorzugt.sort(key=lambda a: min((i for r, i in rang.items() if r in a["ressort"].lower()),
-                                     default=len(rang)))
+    zuletzt = status["ressorts_zuletzt"]
+    # Schwerpunkte abwechseln: Ressort, das am längsten nicht dran war, zuerst –
+    # bei Gleichstand gilt die Reihenfolge aus ressorts_bevorzugt
+    bevorzugt.sort(key=lambda a: (zuletzt.get(a["ressort"], ""),
+                                  min((i for r, i in rang.items() if r in a["ressort"].lower()),
+                                      default=len(rang))))
 
     def verschiedene(liste, anzahl):
         """Erst ein Artikel pro Ressort, dann auffüllen."""
@@ -396,7 +455,6 @@ def auswahl_fuer_heute(z: dict, status_datei: Path, heute: str) -> list[dict]:
     plaetze = max(0, z["pro_tag"] - len(auswahl))
     n_andere = min(z["davon_andere"], plaetze)
     # 3. Entdeckungen: Ressort, das am längsten nicht dran war; darin der längste Text
-    zuletzt = status["ressorts_zuletzt"]
     andere.sort(key=lambda a: (zuletzt.get(a["ressort"], ""), -a["woerter"]))
     entdeckungen = verschiedene(andere, n_andere)
     # 2. Schwerpunkte

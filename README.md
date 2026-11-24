@@ -54,8 +54,8 @@ Volltext-Artikel bringen ihre Fotos mit – aus Webseiten genauso wie aus der SZ
 - **Aufbereitung auf dem Pi:** Graustufen, 1000 px breit, einfaches JPEG – aus 3 MB werden
   ca. 50–100 KB. Eine Ausgabe wächst damit auf etwa 1–4 MB.
 - **Infografiken fliegen raus:** erkannt an Wörtern wie „Grafik“, „Karte“, „Quelle:“ in der
-  Unterschrift oder daran, dass wenige Grauwerte den Großteil der Fläche belegen (bei Fotos
-  verteilen sie sich breit). Mit `infografiken = true` kommen sie doch mit.
+  Unterschrift oder daran, dass im Bild nur wenige Graustufen vorkommen (Fotos haben fast immer
+  20 und mehr von 64, Diagramme und Illustrationen deutlich weniger). Mit `infografiken = true` kommen sie doch mit.
 - **Zitatblöcke** werden eingerückt und mit einer Linie links abgesetzt, Listen bleiben Listen.
 
 Bilder werden erst geladen, wenn feststeht, dass ein Artikel in die Zeitung kommt. Einstellungen

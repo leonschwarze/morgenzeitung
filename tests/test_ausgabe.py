@@ -61,7 +61,8 @@ def test_zerlegen(tmp_path):
     a = arts["Die Koalition wackelt"]
     assert a["ressort"] == "Politik"
     assert 1500 <= a["woerter"] <= 1510
-    assert "<em>Vorspann</em>" in a["html"]            # Hervorhebung bleibt
+    assert a["vorspann"] == "Vorspann zum Text"        # Vorspann wird eigenes Feld …
+    assert "Vorspann" not in a["html"]                 # … und steht nicht doppelt im Text
     assert "<h2>Zwischentitel</h2>" in a["html"]
     assert "<h1" not in a["html"] and 'class="titel"' not in a["html"]
     # Bild wird Platzhalter mit Unterschrift; die Datei fehlt im Mini-EPUB → keine Daten
@@ -81,7 +82,8 @@ def test_rotation_ueber_die_woche(tmp_path):
     assert [a["titel"] for a in zeit.auswahl_fuer_heute(z, status, "2026-11-25")] == \
         [a["titel"] for a in tag1]
     tag2 = zeit.auswahl_fuer_heute(z, status, "2026-11-26")
-    assert [a["titel"] for a in tag2] == ["Europas Zukunft", "Die Bahn im Stresstest"]
+    # Schwerpunkte wechseln sich ab: Politik war gestern dran, heute zuerst Wirtschaft
+    assert [a["titel"] for a in tag2] == ["Die Bahn im Stresstest", "Europas Zukunft"]
     # alles verbraucht: kurze Texte, Riesentext, Hamburg und Leserbriefe bleiben draußen
     assert zeit.auswahl_fuer_heute(z, status, "2026-11-27") == []
 
@@ -96,7 +98,9 @@ def test_neue_ausgabe_beginnt_von_vorn(tmp_path):
     neu = mini_ausgabe(tmp_path / "zeit", "DIE_ZEIT_49.epub")
     os.utime(neu, (time.time() + 60, time.time() + 60))
     tag = zeit.auswahl_fuer_heute(z, status, "2026-12-02")
-    assert [a["titel"] for a in tag][0] == "Die Koalition wackelt"
+    # neue Ausgabe → alle Artikel wieder frei; die Ressort-Rotation läuft weiter
+    # (Politik war zuletzt dran, also zuerst Wirtschaft)
+    assert [a["titel"] for a in tag][0] == "Die Bahn im Stresstest"
     assert json.loads(status.read_text())["ausgabe"] == "DIE_ZEIT_49.epub"
 
 
@@ -210,3 +214,52 @@ def test_teaser_im_epub(tmp_path):
             b.writestr(info, daten)
     html_text = zeit.artikel_lesen(neu)[0]["html"]
     assert html_text.count("Die Koalition ringt") == 1
+
+
+def test_dossier_einmal_pro_ausgabe(tmp_path):
+    """"immer" holt das Dossier auch über max_woerter – aber nur einmal pro Ausgabe."""
+    artikel = dict(ZEIT_ARTIKEL)
+    artikel["Dossier"] = [("Die große Recherche", 4400)]
+    mini_ausgabe(tmp_path / "zeit", artikel=artikel)
+    z = cfg(tmp_path)
+    status = tmp_path / "zeit" / "status.json"
+    tag1 = [a["titel"] for a in zeit.auswahl_fuer_heute(z, status, "2026-11-19")]
+    tag2 = [a["titel"] for a in zeit.auswahl_fuer_heute(z, status, "2026-11-20")]
+    assert tag1[0] == "Die große Recherche" and len(tag1) == 2
+    assert "Die große Recherche" not in tag2
+
+
+def test_kopf_und_uebersichtsseiten(tmp_path):
+    """Kopf (Dachzeile, Vorspann, Autor) wird ausgelesen und aus dem Text entfernt;
+    Ressort-Übersichten und Navigation landen nicht in der Zeitung."""
+    from ebooklib import epub
+    b = epub.EpubBook()
+    b.set_identifier("sz")
+    b.set_title("SZ")
+    b.set_language("de")
+    uebersicht = epub.EpubHtml(title="Wirtschaft", file_name="p1/index.html", lang="de")
+    uebersicht.content = "<html><body><h1>Wirtschaft</h1>" + "<p>Teaser zu irgendwas.</p>" * 80 + "</body></html>"
+    art = epub.EpubHtml(title="Nvidia", file_name="artikel/1/index.html", lang="de")
+    art.content = (
+        '<html><body><ul class="c-nav"><li><a href="../../p1/index.html">Wirtschaft</a></li></ul>'
+        '<div class="c-article-header"><h2 class="sub-header__title">'
+        '<span class="c-article-header__kicker">Chipkonzern</span>'
+        '<span class="c-article-header__headline">Nvidia holt Ex-Chef zurück</span></h2>'
+        '<p class="c-article-header__text">Der Gründer kehrt an die Spitze zurück.</p>'
+        '<p class="c-article-header__author">Von Erika Muster</p></div>'
+        '<p><span class="paragraph__mark">Berlin</span> Erster Absatz des Artikels.</p></body></html>')
+    for k in (uebersicht, art):
+        b.add_item(k)
+    b.toc = [(epub.Section("Wirtschaft", href="p1/index.html"), [art])]
+    b.add_item(epub.EpubNcx())
+    b.add_item(epub.EpubNav())
+    b.spine = [uebersicht, art]
+    epub.write_epub(str(tmp_path / "sz.epub"), b)
+
+    artikel = zeit.artikel_lesen(tmp_path / "sz.epub")
+    assert [a["titel"] for a in artikel] == ["Nvidia"]            # Übersicht fällt weg
+    a = artikel[0]
+    assert (a["dachzeile"], a["vorspann"], a["autor"]) == (
+        "Chipkonzern", "Der Gründer kehrt an die Spitze zurück.", "Erika Muster")
+    # kein Kopf, keine Navigation; Ortsmarke mit Gedankenstrich
+    assert a["html"] == "<p><strong>Berlin</strong> – Erster Absatz des Artikels.</p>"

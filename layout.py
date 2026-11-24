@@ -40,6 +40,7 @@ p { margin: 0; text-indent: 1.2em; text-align: justify;
           border-bottom: 2px solid #000; padding-bottom: .25em; }
 h1 { font-size: 1.55em; line-height: 1.15; margin: 0 0 .45em; font-weight: bold;
      text-align: left; -webkit-hyphens: manual; hyphens: manual; }
+.dachzeile { font-size: .9em; font-weight: bold; text-indent: 0; text-align: left; margin: 0 0 .15em; }
 .vorspann { font-weight: bold; text-indent: 0; text-align: left; margin-bottom: .6em; }
 .meta { font-family: sans-serif; font-size: .72em; text-indent: 0; margin-bottom: 1.1em; }
 .text > p:first-child::first-line { font-weight: bold; }
@@ -254,7 +255,9 @@ def epub_bauen(cfg: dict, auswahl: list, ziel: Path, heute: datetime) -> Path:
             koerper = f'<div class="text">{text}</div>'
             link = f'<p class="quelle-link">{esc(a.url)}</p>' if a.url else ""
             k = seite(datei, a.titel,
-                      f'<p class="kicker">{esc(kicker)}</p><h1>{esc(a.titel)}</h1>'
+                      f'<p class="kicker">{esc(kicker)}</p>'
+                      + (f'<p class="dachzeile">{esc(a.dachzeile)}</p>' if getattr(a, "dachzeile", "") else "")
+                      + f'<h1>{esc(a.titel)}</h1>'
                       f'{vorspann}<p class="meta">{esc(meta)}</p>{koerper}{schluss}{link}',
                       a.sprache)
             kapitel.append(k)

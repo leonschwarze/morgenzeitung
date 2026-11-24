@@ -92,7 +92,7 @@ min_woerter = 250
 max_woerter = 2000
 zaehlt_zur_lesezeit = true
 immer = ["Seite Drei", "Seite 3"]
-ressorts_bevorzugt = ["Politik", "Wirtschaft"]
+ressorts_bevorzugt = ["Politik", "Wirtschaft"]   # "Politik" trifft Innen- und Außenpolitik
 ressorts_ausschliessen = ["München", "Bayern", "Region", "Landkreis", "Dachau", "Ebersberg",
                           "Erding", "Freising", "Fürstenfeldbruck", "Starnberg",
                           "Wolfratshausen", "Bad Tölz"]
@@ -102,6 +102,7 @@ aktiv = true
 ordner = "~/.local/share/morgenzeitung/zeit"   # hier liegen die EPUBs (per Mail geholt oder hineinkopiert)
 pro_tag = 2
 davon_andere = 1                  # 1 Schwerpunkt-Text + 1 Entdeckung aus einem anderen Ressort
+immer = ["Dossier"]               # einmal pro Ausgabe, auch wenn es länger als max_woerter ist
 min_woerter = 1000                # kürzer = kein Longread
 max_woerter = 2500                # länger = sprengt das Frühstück
 zaehlt_zur_lesezeit = true        # true: Nachrichten werden entsprechend kürzer

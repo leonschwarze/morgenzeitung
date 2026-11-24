@@ -10,9 +10,11 @@ So wird aus 3 MB ein Bild von 40–80 KB.
 Infografiken (Diagramme, Karten, Tabellen) sollen draußen bleiben. Erkannt werden
 sie an zwei Merkmalen:
   1. Wörter in Bildunterschrift/Alt-Text wie "Grafik", "Karte", "Quelle:"
-  2. Das Bild selbst: Grafiken bestehen aus wenigen, großen einfarbigen Flächen.
-     Bei einem Foto verteilen sich die Grauwerte breit; bei einer Grafik
-     belegen wenige Grauwerte den Großteil der Fläche.
+  2. Das Bild selbst: Wie viele Graustufen kommen nennenswert vor? Ein Foto hat
+     durch Licht, Schatten und Rauschen fast immer 20 und mehr der 64 Stufen –
+     auch ein Porträt vor hellem Hintergrund. Diagramme, Karten, Illustrationen
+     und Plakate bestehen aus wenigen Flächen und kommen auf deutlich weniger.
+     (An echten ZEIT-Bildern kalibriert: Fotos ab ~20, Grafiken/Cover 9–18.)
 """
 import io
 import logging
@@ -42,15 +44,16 @@ def ist_grafik_laut_text(text: str) -> bool:
     return bool(GRAFIK_WOERTER.search(text or "")) and not FOTO_WOERTER.search(text or "")
 
 
-def flaechenanteil(img) -> float:
-    """Anteil der Fläche, den die 8 häufigsten Grauwerte belegen (auf 64 Stufen gerundet).
-    Fotos: meist unter 0,5. Diagramme, Karten, Screenshots: meist über 0,6."""
-    klein = img.convert("L").resize((128, 128))
-    werte = [p // 4 for p in klein.getdata()]
-    zaehler = {}
-    for w in werte:
-        zaehler[w] = zaehler.get(w, 0) + 1
-    return sum(sorted(zaehler.values(), reverse=True)[:8]) / len(werte)
+GRAFIK_GRENZE = 20
+
+
+def grauwert_stufen(img) -> int:
+    """Wie viele der 64 Graustufen belegen mindestens 0,2 % der Fläche?"""
+    klein = img.convert("L")
+    klein.thumbnail((256, 256))
+    hist = klein.histogram()
+    gesamt = sum(hist)
+    return sum(1 for i in range(0, 256, 4) if sum(hist[i:i + 4]) > gesamt * 0.002)
 
 
 def aufbereiten(roh: bytes, b: dict, beschreibung: str = "") -> bytes | None:
@@ -76,7 +79,7 @@ def aufbereiten(roh: bytes, b: dict, beschreibung: str = "") -> bytes | None:
         img = img.convert("RGBA")
         weiss = Image.new("RGBA", img.size, (255, 255, 255, 255))
         img = Image.alpha_composite(weiss, img)
-    if not b["infografiken"] and flaechenanteil(img) > 0.6 and not FOTO_WOERTER.search(beschreibung):
+    if not b["infografiken"] and grauwert_stufen(img) < GRAFIK_GRENZE and not FOTO_WOERTER.search(beschreibung):
         log.info("    Bild übersprungen (sieht aus wie eine Grafik)")
         return None
     img = img.convert("L")

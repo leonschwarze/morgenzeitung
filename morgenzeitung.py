@@ -94,6 +94,7 @@ class Artikel:
     woerter: int = 0
     autor: str = ""
     ressort: str = ""
+    dachzeile: str = ""
     sprache: str = "de"
     bilder: list = field(default_factory=list)   # fertige JPEGs, im HTML als BILDNR:n referenziert
     bild_quellen: list = field(default_factory=list)  # [(url, unterschrift)] – noch nicht geladen
@@ -406,7 +407,9 @@ def ausgabe_artikel(cfg: dict, abschnitt: str, heute: datetime) -> list[Artikel]
     for a in gewaehlt:
         text, jpegs = bilder.einsetzen(a["html"], a.get("bilder_roh", []), cfg["bilder"])
         ergebnis.append(Artikel(AUSGABEN[abschnitt], a["titel"], "", None, html=text,
-                                woerter=a["woerter"], ressort=a["ressort"], bilder=jpegs))
+                                woerter=a["woerter"], ressort=a["ressort"], bilder=jpegs,
+                                anriss=a.get("vorspann", ""), autor=a.get("autor", ""),
+                                dachzeile=a.get("dachzeile", "")))
     return ergebnis
 
 
