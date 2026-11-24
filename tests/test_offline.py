@@ -188,3 +188,23 @@ def test_sz_ersetzt_tagesschau(tmp_path, monkeypatch):
         "Seite Drei": [("Reportage", 2000)], "Politik": [("Haushalt", 600)]})
     assert lauf(mit_sz=True) is False
     assert lauf(mit_sz=False) is True
+
+
+def test_bereiche_mit_trennseiten(tmp_path):
+    """Quellen mit gleichem Bereich landen zusammen; jeder Bereich bekommt eine Trennseite,
+    jeder Artikel das Bereichsband."""
+    import zipfile
+    cfg, netz = config(tmp_path), FakeNetz()
+    cfg["quelle"][0]["bereich"] = "Bonn & NRW"
+    cfg["quelle"][1]["bereich"] = "Bonn & NRW"
+    cfg["quelle"][2]["bereich"] = "Technik"
+    auswahl = mz.auswaehlen(cfg, mz.kandidaten_sammeln(cfg, netz), netz)
+    pfad = mz.epub_bauen(cfg, auswahl, tmp_path / "out", datetime(2026, 11, 25, 6))
+    with zipfile.ZipFile(pfad) as z:
+        namen = z.namelist()
+        artikel = z.read("EPUB/b1q0a0.xhtml").decode()
+        nav = z.read("EPUB/nav.xhtml").decode()
+    assert "EPUB/b1.xhtml" in namen and "EPUB/b2.xhtml" in namen and "EPUB/bilder/bereich1.png" in namen
+    assert '<p class="band">Bonn &amp; NRW</p>' in artikel
+    assert nav.index("Bonn &amp; NRW") < nav.index("Technik")      # Bereiche in Reihenfolge
+    assert nav.index('href="b1.xhtml"') < nav.index('href="b1q0a0.xhtml"')  # Trennseite vorn

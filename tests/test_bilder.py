@@ -84,9 +84,9 @@ def test_webartikel_mit_bildern_unterschrift_und_zitat(tmp_path):
     pfad = mz.epub_bauen(cfg, auswahl, tmp_path / "out", datetime(2026, 11, 25, 6))
     with zipfile.ZipFile(pfad) as z:
         namen = z.namelist()
-        seite = z.read("EPUB/q0a0.xhtml").decode()
-    assert sum(n.startswith("EPUB/bilder/") for n in namen) == 2
-    assert 'src="bilder/q0a0_0.jpg"' in seite and "<figcaption>" in seite and "<blockquote>" in seite
+        seite = z.read("EPUB/b1q0a0.xhtml").decode()
+    assert sum(n.startswith("EPUB/bilder/b") and n.endswith(".jpg") for n in namen) == 2
+    assert 'src="bilder/b1q0a0_0.jpg"' in seite and "<figcaption>" in seite and "<blockquote>" in seite
 
 
 def test_bilder_aus_epub_ausgabe(tmp_path):

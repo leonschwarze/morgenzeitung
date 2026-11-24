@@ -61,6 +61,18 @@ blockquote + p { text-indent: 0; }
 .text ul, .text ol { margin: .6em 0 .6em 1.2em; padding: 0; }
 .text li { margin-bottom: .3em; }
 
+/* --- Bereiche ------------------------------------------------------------------ */
+/* Balken links statt weißer Schrift auf Schwarz: funktioniert auf jedem Reader */
+.band { font-family: sans-serif; font-size: .75em; font-weight: bold; letter-spacing: .14em;
+        text-transform: uppercase; text-indent: 0; text-align: left;
+        border-left: .9em solid #000; padding-left: .45em; margin: 0 0 .7em; }
+.band-inhalt { font-size: .85em; margin-top: 1.4em; border-left-width: 1.1em; }
+.band a { color: #000; text-decoration: none; }
+.trenn { margin-top: 20%; text-align: center; }
+.trenn img { width: 100%; height: auto; }
+.trenn-info { font-family: sans-serif; font-size: .75em; text-indent: 0; text-align: center;
+              margin: .6em 0 1.2em; }
+
 /* --- Titel-/Inhaltsseite ------------------------------------------------- */
 .kopf { text-align: center; margin-top: .4em; }
 .marke { font-size: 2.1em; font-weight: bold; letter-spacing: .06em; text-indent: 0;
@@ -188,10 +200,47 @@ def _vorspann_noetig(anriss: str, text_html: str) -> bool:
     return anfang not in re.sub(r"\W+", " ", re.sub(r"<[^>]+>", " ", text_html)).lower()
 
 
+def bereichsbild(name: str, nummer: int) -> bytes:
+    """Schwarzes Band mit dem Bereichsnamen in Weiß – als Bild, weil weiße Schrift
+    auf schwarzem Grund per CSS nicht jeder E-Reader zuverlässig darstellt."""
+    from PIL import Image, ImageDraw
+    W, H = 1000, 260
+    img = Image.new("L", (W, H), 0)
+    d = ImageDraw.Draw(img)
+    f = _schrift(92, True, serif=False)
+    text = name.upper()
+    while d.textlength(text, font=f) > W - 120 and f.size > 40:
+        f = _schrift(f.size - 4, True, serif=False)
+    w = d.textlength(text, font=f)
+    d.text(((W - w) / 2, (H - f.size) / 2 - 10), text, font=f, fill=255)
+    fz = _schrift(30, serif=False)
+    marke = f"TEIL {nummer}"
+    d.text(((W - d.textlength(marke, font=fz)) / 2, 22), marke, font=fz, fill=180)
+    puffer = BytesIO()
+    img.save(puffer, "PNG", optimize=True)
+    return puffer.getvalue()
+
+
+def _gruppieren(auswahl: list) -> list[tuple[str, list[tuple[str, list]]]]:
+    """[(bereich, [(quelle, [artikel, …]), …]), …] – Reihenfolge wie in der Auswahl."""
+    bereiche: dict[str, dict[str, list]] = {}
+    for a in auswahl:
+        b = getattr(a, "bereich", "") or a.quelle
+        bereiche.setdefault(b, {}).setdefault(a.quelle, []).append(a)
+    return [(b, list(q.items())) for b, q in bereiche.items()]
+
+
 def epub_bauen(cfg: dict, auswahl: list, ziel: Path, heute: datetime) -> Path:
+    """Aufbau der Zeitung:
+      Inhaltsseite (Kopf, Aufmacher, alle Bereiche)
+      je Bereich: Trennseite (schwarzes Band + Inhalt des Bereichs), dann seine Artikel
+      Schlussseite
+    Jeder Artikel trägt oben den Bereichsnamen mit Balken – so weiß man beim
+    Blättern immer, in welchem Teil der Zeitung man ist."""
     from ebooklib import epub
     z = cfg["zeitung"]
     wpm = z["woerter_pro_minute"]
+    trennseiten = z.get("trennseiten", True)
     modus = {q["name"]: q.get("modus", "volltext") for q in cfg.get("quelle", [])}
     quellen = list(dict.fromkeys(a.quelle for a in auswahl))
     minuten_gesamt = max(1, round(sum(a.woerter for a in auswahl) / wpm))
@@ -212,67 +261,86 @@ def epub_bauen(cfg: dict, auswahl: list, ziel: Path, heute: datetime) -> Path:
         buch.add_item(k)
         return k
 
-    kapitel, toc, liste, schlagzeilen = [], [], [], []
+    def ist_kurz(q, arts):
+        return modus.get(q) == "schlagzeilen" or all(getattr(a, "kurz", False) for a in arts)
+
+    kapitel, toc, uebersicht, schlagzeilen = [], [], [], []
     aufmacher = None
-    for qi, q in enumerate(quellen):
-        arts = [a for a in auswahl if a.quelle == q]
-        if modus.get(q) == "schlagzeilen":
-            datei = f"q{qi}.xhtml"
-            teile = [f'<p class="kicker">Kurz notiert · {esc(q)}</p>']
-            for a in arts:
-                teile.append(f'<div class="meldung"><b>{esc(a.titel)}</b>'
-                             f'<p>{esc(a.anriss)}</p></div>')
-            k = seite(datei, f"Kurz notiert: {q}", "\n".join(teile), arts[0].sprache)
-            kapitel.append(k)
-            toc.append(k)
-            liste.append(f'<p class="rubrik">Kurz notiert · {esc(q)}</p><div class="liste">'
-                         f'<p><a href="{datei}">{len(arts)} Meldungen</a></p></div>')
-            continue
-
-        eintraege = []
-        unter = []
-        for ai, a in enumerate(arts):
-            datei = f"q{qi}a{ai}.xhtml"
-            minuten = max(1, round(a.woerter / wpm))
-            kicker = " · ".join(x for x in [q, a.ressort,
-                                            a.zeit.strftime("%H:%M Uhr") if a.zeit else ""] if x)
-            meta = " · ".join(x for x in [f"Von {a.autor}" if a.autor else "",
-                                          f"{minuten} Min. Lesezeit"] if x)
-            vorspann = (f'<p class="vorspann">{esc(a.anriss)}</p>'
-                        if _vorspann_noetig(a.anriss, a.html) else "")
-            # Schlusszeichen ■ ans Ende des letzten Absatzes – wie in der gedruckten Zeitung
-            text = a.html.rstrip()
-            if text.endswith("</p>"):
-                text, schluss = text[:-4] + "&#160;■</p>", ""
-            else:
-                schluss = '<p class="ende">■</p>'
-            # Bilder als eigene Dateien ins EPUB, Platzhalter BILDNR:n → echter Pfad
-            for n, jpeg in enumerate(getattr(a, "bilder", [])):
-                bildname = f"bilder/q{qi}a{ai}_{n}.jpg"
-                buch.add_item(epub.EpubImage(uid=f"bild_q{qi}a{ai}_{n}", file_name=bildname,
-                                             media_type="image/jpeg", content=jpeg))
-                text = text.replace(f'src="BILDNR:{n}"', f'src="{bildname}"')
-            koerper = f'<div class="text">{text}</div>'
-            link = f'<p class="quelle-link">{esc(a.url)}</p>' if a.url else ""
-            k = seite(datei, a.titel,
-                      f'<p class="kicker">{esc(kicker)}</p>'
-                      + (f'<p class="dachzeile">{esc(a.dachzeile)}</p>' if getattr(a, "dachzeile", "") else "")
-                      + f'<h1>{esc(a.titel)}</h1>'
-                      f'{vorspann}<p class="meta">{esc(meta)}</p>{koerper}{schluss}{link}',
-                      a.sprache)
-            kapitel.append(k)
-            unter.append(k)
-            if aufmacher is None:
-                aufmacher = (q, a, datei, minuten)
+    for bi, (bereich, gruppen) in enumerate(_gruppieren(auswahl), start=1):
+        band = f'<p class="band">{esc(bereich)}</p>'
+        bereich_seiten, inhalt_bereich = [], []
+        for qi, (q, arts) in enumerate(gruppen):
+            praefix = f"b{bi}q{qi}"
+            if ist_kurz(q, arts):
+                datei = f"{praefix}.xhtml"
+                teile = [band, f'<p class="kicker">Kurz notiert · {esc(q)}</p>']
+                for a in arts:
+                    teile.append(f'<div class="meldung"><b>{esc(a.titel)}</b>'
+                                 f'<p>{esc(a.anriss)}</p></div>')
+                k = seite(datei, f"Kurz notiert: {q}", "\n".join(teile), arts[0].sprache)
+                bereich_seiten.append(k)
+                titel_liste = "".join(f'<p><a href="{datei}">{esc(a.titel)}</a></p>' for a in arts[:4])
+                rest = f'<p><a href="{datei}">… und {len(arts) - 4} weitere</a></p>' if len(arts) > 4 else ""
+                inhalt_bereich.append(f'<p class="rubrik">Kurz notiert · {esc(q)}</p>'
+                                      f'<div class="liste">{titel_liste}{rest}</div>')
                 continue
-            schlagzeilen.append((q if not a.ressort else f"{q} · {a.ressort}", a.titel))
-            eintraege.append(f'<p><a href="{datei}">{esc(a.titel)}</a> '
-                             f'<span class="min">{minuten} Min.</span></p>')
-        if eintraege:
-            liste.append(f'<p class="rubrik">{esc(q)}</p><div class="liste">{"".join(eintraege)}</div>')
-        toc.append((epub.Section(q), unter))
 
-    # Inhaltsseite = erste Seite: Zeitungskopf, Aufmacher, dann alles nach Rubriken
+            eintraege = []
+            for ai, a in enumerate(arts):
+                datei = f"{praefix}a{ai}.xhtml"
+                minuten = max(1, round(a.woerter / wpm))
+                kicker = " · ".join(x for x in [q, a.ressort,
+                                                a.zeit.strftime("%H:%M Uhr") if a.zeit else ""] if x)
+                meta = " · ".join(x for x in [f"Von {a.autor}" if a.autor else "",
+                                              f"{minuten} Min. Lesezeit"] if x)
+                vorspann = (f'<p class="vorspann">{esc(a.anriss)}</p>'
+                            if _vorspann_noetig(a.anriss, a.html) else "")
+                # Schlusszeichen ■ ans Ende des letzten Absatzes – wie in der gedruckten Zeitung
+                text = a.html.rstrip()
+                if text.endswith("</p>"):
+                    text, schluss = text[:-4] + "&#160;■</p>", ""
+                else:
+                    schluss = '<p class="ende">■</p>'
+                # Bilder als eigene Dateien ins EPUB, Platzhalter BILDNR:n → echter Pfad
+                for n, jpeg in enumerate(getattr(a, "bilder", [])):
+                    bildname = f"bilder/{praefix}a{ai}_{n}.jpg"
+                    buch.add_item(epub.EpubImage(uid=f"bild_{praefix}a{ai}_{n}", file_name=bildname,
+                                                 media_type="image/jpeg", content=jpeg))
+                    text = text.replace(f'src="BILDNR:{n}"', f'src="{bildname}"')
+                link = f'<p class="quelle-link">{esc(a.url)}</p>' if a.url else ""
+                dach = f'<p class="dachzeile">{esc(a.dachzeile)}</p>' if getattr(a, "dachzeile", "") else ""
+                k = seite(datei, a.titel,
+                          f'{band}<p class="kicker">{esc(kicker)}</p>{dach}<h1>{esc(a.titel)}</h1>'
+                          f'{vorspann}<p class="meta">{esc(meta)}</p>'
+                          f'<div class="text">{text}</div>{schluss}{link}', a.sprache)
+                bereich_seiten.append(k)
+                if aufmacher is None:
+                    aufmacher = (q, a, datei, minuten)
+                else:
+                    schlagzeilen.append((q if not a.ressort else f"{q} · {a.ressort}", a.titel))
+                eintraege.append(f'<p><a href="{datei}">{esc(a.titel)}</a> '
+                                 f'<span class="min">{minuten} Min.</span></p>')
+            inhalt_bereich.append(f'<p class="rubrik">{esc(q)}</p><div class="liste">{"".join(eintraege)}</div>')
+
+        minuten_bereich = max(1, round(sum(a.woerter for _, arts in gruppen for a in arts) / wpm))
+        if trennseiten:
+            bildname = f"bilder/bereich{bi}.png"
+            buch.add_item(epub.EpubImage(uid=f"bereich{bi}", file_name=bildname,
+                                         media_type="image/png", content=bereichsbild(bereich, bi)))
+            trenn = seite(f"b{bi}.xhtml", bereich,
+                          f'<div class="trenn"><img src="{bildname}" alt="{esc(bereich)}"/></div>'
+                          f'<p class="trenn-info">{minuten_bereich} Min. Lesezeit</p>'
+                          + "".join(inhalt_bereich))
+            kapitel.append(trenn)
+            ziel_bereich = f"b{bi}.xhtml"
+        else:
+            ziel_bereich = bereich_seiten[0].file_name
+        kapitel += bereich_seiten
+        toc.append((epub.Section(bereich, href=ziel_bereich), bereich_seiten))
+        uebersicht.append(f'<p class="band band-inhalt"><a href="{ziel_bereich}">{esc(bereich)}</a> '
+                          f'<span class="min">{minuten_bereich} Min.</span></p>' + "".join(inhalt_bereich))
+
+    # Inhaltsseite = erste Seite: Zeitungskopf, Aufmacher, dann alle Bereiche
     kopf = (f'<div class="kopf"><p class="marke">{esc(z["titel"])}</p></div>'
             f'<p class="datumszeile">{datum_lang(heute)} · Nr. {nummer} · '
             f'{minuten_gesamt} Min. Lesezeit</p>')
@@ -283,7 +351,7 @@ def epub_bauen(cfg: dict, auswahl: list, ziel: Path, heute: datetime) -> Path:
         kopf += (f'<p class="aufmacher-kicker">{esc(q)} · {minuten} Min.</p>'
                  f'<p class="aufmacher"><a href="{datei}">{esc(a.titel)}</a></p>'
                  + (f'<p class="aufmacher-text">{esc(anriss[:260])}</p>' if anriss else ""))
-    vorne = seite("inhalt.xhtml", "Inhalt", kopf + "".join(liste))
+    vorne = seite("inhalt.xhtml", "Inhalt", kopf + "".join(uebersicht))
 
     ende = seite("ende.xhtml", "Ende", f'<div class="schluss"><p>■</p>'
                  f'<p>Das war die {esc(z["titel"])} für {WOCHENTAGE[heute.weekday()]}.</p>'

@@ -46,10 +46,13 @@ STANDARDS = {
         "davon_andere": 1,          # so viele "Entdeckungen" aus nicht bevorzugten Ressorts
         "min_woerter": 1000,
         "max_woerter": 2500,
-        "zaehlt_zur_lesezeit": True,
+        "zaehlt_zur_lesezeit": False,
+        "bereich": "Lange Lektüre",
+        "als_schlagzeilen": [],
+        "schlagzeilen_bereich": "Auf einen Blick",
         "immer": ["Dossier"],       # einmal pro Ausgabe, egal wie lang (danach ist es "verbraucht")
         "ressorts_bevorzugt": ["Dossier", "Politik", "Wirtschaft"],
-        "ressorts_ausschliessen": ["Hamburg", "Osten", "Schweiz"],
+        "ressorts_ausschliessen": ["Hamburg", "Osten", "Schweiz", "Österreich"],
         "ausschliessen": ["Leserbrief", "Impressum", "Inhalt", "Rätsel", "Kreuzwort", "Anzeige",
                           "Chancen", "Stellenmarkt", "Was bisher geschah"],
     },
@@ -60,7 +63,10 @@ STANDARDS = {
         "davon_andere": 1,
         "min_woerter": 250,
         "max_woerter": 2000,
-        "zaehlt_zur_lesezeit": True,
+        "zaehlt_zur_lesezeit": False,
+        "bereich": "Deutschland & Welt",
+        "als_schlagzeilen": ["Titelseite"],     # diese Ressorts als Kurzmeldungen (Titel + Teaser)
+        "schlagzeilen_bereich": "Auf einen Blick",
         "immer": ["Seite Drei", "Seite 3"],
         "ressorts_bevorzugt": ["Politik", "Wirtschaft"],
         "ressorts_ausschliessen": ["München", "Bayern", "Region", "Landkreis", "Dachau", "Ebersberg",
@@ -413,6 +419,7 @@ def auswahl_fuer_heute(z: dict, status_datei: Path, heute: str) -> list[dict]:
     frei = [a for a in alle.values()
             if a["id"] not in benutzt
             and not _passt(a["ressort"], z["ressorts_ausschliessen"])
+            and not (z["als_schlagzeilen"] and _passt(a["ressort"], z["als_schlagzeilen"]))
             and not _passt(a["titel"] + " " + a["ressort"], z["ausschliessen"])
             and a["woerter"] > 0]
 
@@ -471,6 +478,28 @@ def auswahl_fuer_heute(z: dict, status_datei: Path, heute: str) -> list[dict]:
     log.info("%s: %d Artikel – %s", z["name"], len(auswahl),
              "; ".join(f"{a['ressort'] or '?'}: {a['titel'][:35]}" for a in auswahl))
     return auswahl
+
+
+def schlagzeilen_fuer_heute(z: dict) -> list[dict]:
+    """Artikel aus den Ressorts in als_schlagzeilen (z. B. die SZ-Titelseite) als
+    Kurzmeldungen: Titel + Teaser. Fehlt ein Teaser (z. B. beim Streiflicht),
+    nehmen wir den Anfang des Texts."""
+    if not z["als_schlagzeilen"]:
+        return []
+    ausgabe = neueste_ausgabe(z)
+    if ausgabe is None:
+        return []
+    meldungen = []
+    for a in artikel_lesen(ausgabe):
+        if not _passt(a["ressort"], z["als_schlagzeilen"]) or a["woerter"] == 0:
+            continue
+        teaser = a.get("vorspann") or ""
+        if not teaser:
+            text = " ".join(html.unescape(re.sub(r"<figure.*?</figure>|<[^>]+>", " ", a["html"],
+                                                 flags=re.S)).split())
+            teaser = text[:240].rsplit(" ", 1)[0] + " …" if len(text) > 240 else text
+        meldungen.append({"titel": a["titel"], "teaser": teaser, "ressort": a["ressort"]})
+    return meldungen
 
 
 if __name__ == "__main__":

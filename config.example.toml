@@ -7,7 +7,8 @@
 [zeitung]
 titel = "Morgenzeitung"
 untertitel = "Deutschland · NRW · Welt"
-lesezeit_minuten = 20        # Ziel: so lange soll die Lektüre dauern
+lesezeit_minuten = 20        # Lesezeit für die Feed-Quellen; SZ und ZEIT kommen obendrauf
+trennseiten = true           # jeder Bereich beginnt mit einer Seite mit schwarzem Band
 woerter_pro_minute = 230     # durchschnittliches Lesetempo am E-Reader
 max_alter_stunden = 20       # ältere Feed-Einträge werden ignoriert
 ausgabe_ordner = "~/.local/share/morgenzeitung/ausgaben"
@@ -29,11 +30,13 @@ infografiken = false         # Diagramme, Karten, Tabellen weglassen
 #   ausschliessen = Wörter im Titel oder in der URL, die übersprungen werden
 #   sprache       = "de" oder "fr" (Silbentrennung am Reader)
 #   ersatz_fuer   = "sz": Quelle springt nur ein, wenn die SZ-Ausgabe fehlt
+#   bereich       = Teil der Zeitung, in dem die Quelle erscheint (gleicher Name = gleicher Teil)
 #   nur_mit       = nur Einträge, deren Titel oder Anriss eines dieser Wörter enthält
 # ---------------------------------------------------------------------------
 
 [[quelle]]
 name = "Tagesschau"
+bereich = "Deutschland & Welt"
 feed = "https://www.tagesschau.de/index~rss2.xml"
 ersatz_fuer = "sz"            # nur dabei, wenn heute keine SZ-Ausgabe vorliegt
 artikel = 6
@@ -42,6 +45,7 @@ ausschliessen = ["liveblog", "/video/", "/multimedia/"]
 
 [[quelle]]
 name = "WDR – Bonn & Landespolitik"
+bereich = "Bonn & NRW"
 feed = "https://www1.wdr.de/uebersicht-100.feed"
 artikel = 5
 min_woerter = 120
@@ -51,6 +55,7 @@ nur_mit = ["Bonn", "Rhein-Sieg", "Siegburg", "Troisdorf", "Königswinter", "Bad 
 
 [[quelle]]
 name = "franceinfo"
+bereich = "Frankreich"
 feed = "https://www.francetvinfo.fr/politique.rss"
 sprache = "fr"                # für richtige Silbentrennung am Reader
 artikel = 2
@@ -59,6 +64,7 @@ ausschliessen = ["/replay-radio/", "/video/", "direct"]
 
 [[quelle]]
 name = "Le Monde"
+bereich = "Frankreich"
 feed = "https://www.lemonde.fr/rss/une.xml"
 sprache = "fr"
 artikel = 6
@@ -67,6 +73,7 @@ ausschliessen = ["/live/", "/video/"]
 
 [[quelle]]
 name = "heise online"
+bereich = "Technik"
 feed = "https://www.heise.de/rss/heise-top-atom.xml"
 artikel = 8
 modus = "schlagzeilen"
@@ -85,12 +92,15 @@ ausschliessen = ["heise+"]
 # ---------------------------------------------------------------------------
 [sz]
 aktiv = true
+bereich = "Deutschland & Welt"
+als_schlagzeilen = ["Titelseite"]   # Top-Meldungen der Titelseite als Kurzmeldungen mit Teaser
+schlagzeilen_bereich = "Auf einen Blick"
 ordner = "~/.local/share/morgenzeitung/sz"     # hier landet die tägliche EPUB-Ausgabe
 pro_tag = 5
 davon_andere = 1
 min_woerter = 250
 max_woerter = 2000
-zaehlt_zur_lesezeit = true
+zaehlt_zur_lesezeit = false       # false: kommt zur Lesezeit der Feeds hinzu
 immer = ["Seite Drei", "Seite 3"]
 ressorts_bevorzugt = ["Politik", "Wirtschaft"]   # "Politik" trifft Innen- und Außenpolitik
 ressorts_ausschliessen = ["München", "Bayern", "Region", "Landkreis", "Dachau", "Ebersberg",
@@ -99,15 +109,16 @@ ressorts_ausschliessen = ["München", "Bayern", "Region", "Landkreis", "Dachau",
 
 [zeit]
 aktiv = true
+bereich = "Lange Lektüre"
 ordner = "~/.local/share/morgenzeitung/zeit"   # hier liegen die EPUBs (per Mail geholt oder hineinkopiert)
 pro_tag = 2
 davon_andere = 1                  # 1 Schwerpunkt-Text + 1 Entdeckung aus einem anderen Ressort
 immer = ["Dossier"]               # einmal pro Ausgabe, auch wenn es länger als max_woerter ist
 min_woerter = 1000                # kürzer = kein Longread
 max_woerter = 2500                # länger = sprengt das Frühstück
-zaehlt_zur_lesezeit = true        # true: Nachrichten werden entsprechend kürzer
+zaehlt_zur_lesezeit = false       # true: Nachrichten werden entsprechend kürzer
 ressorts_bevorzugt = ["Dossier", "Politik", "Wirtschaft"]
-ressorts_ausschliessen = ["Hamburg", "Osten", "Schweiz"]
+ressorts_ausschliessen = ["Hamburg", "Osten", "Schweiz", "Österreich"]
 
 # Optional: Ausgabe automatisch aus dem Postfach holen (nur lesend).
 # Ohne diesen Abschnitt einfach die EPUB-Datei in den Ordner oben kopieren.

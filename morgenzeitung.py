@@ -95,6 +95,8 @@ class Artikel:
     autor: str = ""
     ressort: str = ""
     dachzeile: str = ""
+    bereich: str = ""              # Teil der Zeitung, z. B. "Bonn & NRW" – leer = Name der Quelle
+    kurz: bool = False             # True = nur Titel + Teaser ("Kurz notiert")
     sprache: str = "de"
     bilder: list = field(default_factory=list)   # fertige JPEGs, im HTML als BILDNR:n referenziert
     bild_quellen: list = field(default_factory=list)  # [(url, unterschrift)] – noch nicht geladen
@@ -154,7 +156,9 @@ def kandidaten_sammeln(cfg: dict, netz) -> dict[str, list[Artikel]]:
             if zeit and zeit < grenze:
                 continue
             gesehen.add(url)
-            liste.append(Artikel(q["name"], titel, url, zeit, anriss=anriss, sprache=q["sprache"]))
+            liste.append(Artikel(q["name"], titel, url, zeit, anriss=anriss, sprache=q["sprache"],
+                                 bereich=q.get("bereich", q["name"]),
+                                 kurz=q["modus"] == "schlagzeilen"))
         log.info("%s: %d frische Einträge", q["name"], len(liste))
         ergebnis[q["name"]] = liste
     return ergebnis
@@ -382,7 +386,7 @@ h2 {{ font-size: 1em; margin-top: 2em; border-bottom: 1px solid #000; }}
 
 AUSGABEN = {                       # Abschnitt in config.toml → Bezeichnung in der Zeitung
     "sz": "Süddeutsche Zeitung",
-    "zeit": "Die ZEIT · Lange Lektüre",
+    "zeit": "Die ZEIT",
 }
 
 
@@ -409,8 +413,25 @@ def ausgabe_artikel(cfg: dict, abschnitt: str, heute: datetime) -> list[Artikel]
         ergebnis.append(Artikel(AUSGABEN[abschnitt], a["titel"], "", None, html=text,
                                 woerter=a["woerter"], ressort=a["ressort"], bilder=jpegs,
                                 anriss=a.get("vorspann", ""), autor=a.get("autor", ""),
-                                dachzeile=a.get("dachzeile", "")))
+                                dachzeile=a.get("dachzeile", ""), bereich=ac["bereich"]))
     return ergebnis
+
+
+def ausgabe_schlagzeilen(cfg: dict, abschnitt: str) -> list[Artikel]:
+    """Kurzmeldungen aus einer Ausgabe, z. B. die Top-Meldungen der SZ-Titelseite."""
+    import ausgabe
+    ac = ausgabe.standard(cfg, abschnitt)
+    if not ac["aktiv"]:
+        return []
+    try:
+        meldungen = ausgabe.schlagzeilen_fuer_heute(ac)
+    except Exception as e:
+        log.warning("%s: Schlagzeilen nicht lesbar (%s)", ac["name"], e)
+        return []
+    name = "Titelseite der " + {"sz": "SZ", "zeit": "ZEIT"}[abschnitt]
+    return [Artikel(name, m["titel"], "", None, anriss=m["teaser"], kurz=True,
+                    bereich=ac["schlagzeilen_bereich"],
+                    woerter=woerter_zaehlen(m["titel"] + " " + m["teaser"])) for m in meldungen]
 
 
 # --------------------------------------------------------------------------- Hauptprogramm
@@ -425,6 +446,7 @@ def main(argv=None) -> int:
     # 1. Fertige Ausgaben zuerst: Die SZ ist Hauptquelle, die ZEIT liefert Longreads.
     #    Beide verkleinern (falls zaehlt_zur_lesezeit) das Budget für die Feeds.
     sz = ausgabe_artikel(cfg, "sz", heute)
+    sz_kurz = ausgabe_schlagzeilen(cfg, "sz") if sz else []
     longreads = ausgabe_artikel(cfg, "zeit", heute)
 
     # 2. Ersatzquellen (z. B. Tagesschau mit ersatz_fuer = "sz") nur, wenn die SZ fehlt
@@ -447,7 +469,7 @@ def main(argv=None) -> int:
         if teil and cfg[abschnitt]["zaehlt_zur_lesezeit"]:
             budget -= sum(a.woerter for a in teil)
     budget = max(budget, z["lesezeit_minuten"] * z["woerter_pro_minute"] // 4)
-    auswahl = sz + auswaehlen(cfg, kandidaten, netz, budget) + longreads
+    auswahl = sz_kurz + sz + auswaehlen(cfg, kandidaten, netz, budget) + longreads
     if not auswahl:
         log.error("Keine Artikel – Abbruch (Netz weg?)")
         return 1

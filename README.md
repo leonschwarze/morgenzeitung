@@ -42,6 +42,21 @@ zugänglichen Feeds. Fehlt die SZ an einem Morgen, springt die Tagesschau ein.
   kommen nur Meldungen durch, deren Titel oder Anriss eines der Stichwörter enthält (Bonn,
   Rhein-Sieg, Landtag, Landesregierung …).
 
+## Bereiche: die „Bücher“ der Zeitung
+
+Wie eine gedruckte Zeitung ist die Ausgabe in Teile gegliedert, z. B. *Auf einen Blick*,
+*Deutschland & Welt*, *Bonn & NRW*, *Frankreich*, *Technik*, *Lange Lektüre*.
+
+- Jede Quelle bekommt in `config.toml` ein `bereich = "…"`. Quellen mit gleichem Bereich
+  stehen zusammen; die Reihenfolge ergibt sich aus der Reihenfolge in der Zeitung.
+- Jeder Bereich beginnt mit einer **Trennseite**: schwarzes Band mit dem Namen (als Bild, weil
+  weiße Schrift auf Schwarz per CSS nicht jeder Reader kann), Lesezeit und Inhalt des Bereichs.
+  Abschalten mit `trennseiten = false`.
+- Jeder Artikel trägt oben den Bereichsnamen mit schwarzem Balken – so weiß man beim Blättern
+  immer, wo man ist. Im Inhaltsverzeichnis des Tolino sind die Bereiche die oberste Ebene.
+- Die Top-Meldungen der SZ-Titelseite kommen als Kurzmeldungen mit Teaser nach *Auf einen
+  Blick* (`als_schlagzeilen` im Abschnitt `[sz]`).
+
 ## Bilder, Bildunterschriften, Zitate
 
 Volltext-Artikel bringen ihre Fotos mit – aus Webseiten genauso wie aus der SZ- und ZEIT-Ausgabe.
@@ -88,8 +103,9 @@ Woche, bei der SZ beginnt mit jeder neuen Tagesausgabe die Auswahl von vorn.
   die EPUB-Datei nach `~/.local/share/morgenzeitung/sz/` kopieren.
 - *Von Hand:* Jede EPUB-Datei kann einfach in den passenden Ordner kopiert werden.
 
-**Lesezeit:** Mit `zaehlt_zur_lesezeit = true` werden SZ und ZEIT auf die 20 Minuten angerechnet,
-die Feeds füllen den Rest. Ein Viertel des Budgets bleibt immer für die Feeds reserviert.
+**Lesezeit:** `lesezeit_minuten` gilt für die Feed-Quellen; SZ und ZEIT kommen obendrauf
+(`zaehlt_zur_lesezeit = false`). Mit `true` werden sie auf das Budget angerechnet, und die Feeds
+füllen nur den Rest – mindestens ein Viertel bleibt aber immer für sie.
 
 **Prüfen, wie eine echte Ausgabe zerlegt wird:**
 
@@ -129,7 +145,7 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 mkdir -p ~/.config/morgenzeitung
 cp config.example.toml ~/.config/morgenzeitung/config.toml   # dann anpassen
-.venv/bin/python -m pytest -q          # sollte "18 passed" melden
+.venv/bin/python -m pytest -q          # sollte "24 passed" melden
 ```
 
 **Erster Lauf von Hand:**

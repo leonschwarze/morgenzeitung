@@ -263,3 +263,15 @@ def test_kopf_und_uebersichtsseiten(tmp_path):
         "Chipkonzern", "Der Gründer kehrt an die Spitze zurück.", "Erika Muster")
     # kein Kopf, keine Navigation; Ortsmarke mit Gedankenstrich
     assert a["html"] == "<p><strong>Berlin</strong> – Erster Absatz des Artikels.</p>"
+
+
+def test_sz_titelseite_als_schlagzeilen(tmp_path):
+    sz = {"Titelseite": [("Atomwaffe im All", 700), ("Das Streiflicht", 400)],
+          "Politik": [("Haushalt", 600)], "Die Seite Drei": [("Reportage", 3000)]}
+    mini_ausgabe(tmp_path / "sz", "SZ.epub", sz)
+    z = zeit.standard({"sz": {"aktiv": True, "ordner": str(tmp_path / "sz")}}, "sz")
+    kurz = zeit.schlagzeilen_fuer_heute(z)
+    assert [m["titel"] for m in kurz] == ["Atomwaffe im All", "Das Streiflicht"]
+    assert kurz[0]["teaser"] == "Vorspann zum Text"
+    titel = [a["titel"] for a in zeit.auswahl_fuer_heute(z, tmp_path / "sz" / "status.json", "2026-11-25")]
+    assert "Atomwaffe im All" not in titel and titel[0] == "Reportage"   # nicht doppelt als Artikel
