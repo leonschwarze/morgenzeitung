@@ -1,0 +1,80 @@
+# Morgenzeitung – Konfiguration
+# Kopieren nach config.toml und anpassen:  cp config.example.toml config.toml
+
+[zeitung]
+titel = "Morgenzeitung"
+untertitel = "Deutschland · NRW · Welt"
+lesezeit_minuten = 20        # Ziel: so lange soll die Lektüre dauern
+woerter_pro_minute = 230     # durchschnittliches Lesetempo am E-Reader
+max_alter_stunden = 20       # ältere Feed-Einträge werden ignoriert
+ausgabe_ordner = "~/morgenzeitung/ausgaben"
+aufbewahren_tage = 7         # ältere Ausgaben werden gelöscht
+
+# ---------------------------------------------------------------------------
+# Quellen. Reihenfolge = Reihenfolge in der Zeitung und Priorität beim Auswählen.
+#   artikel       = höchstens so viele Artikel aus dieser Quelle
+#   modus         = "volltext" (ganzer Artikel) oder "schlagzeilen" (nur Titel + Anriss)
+#   min_woerter   = kürzere Texte fliegen raus (z. B. Paywall-Teaser bei Le Monde)
+#   ausschliessen = Wörter im Titel oder in der URL, die übersprungen werden
+#   sprache       = "de" oder "fr" (Silbentrennung am Reader)
+#   nur_mit       = nur Einträge, deren Titel oder Anriss eines dieser Wörter enthält
+# ---------------------------------------------------------------------------
+
+[[quelle]]
+name = "Tagesschau"
+feed = "https://www.tagesschau.de/index~rss2.xml"
+artikel = 6
+min_woerter = 120
+ausschliessen = ["liveblog", "/video/", "/multimedia/"]
+
+[[quelle]]
+name = "WDR – Bonn & Landespolitik"
+feed = "https://www1.wdr.de/uebersicht-100.feed"
+artikel = 5
+min_woerter = 120
+nur_mit = ["Bonn", "Rhein-Sieg", "Siegburg", "Troisdorf", "Königswinter", "Bad Godesberg",
+           "Beuel", "Landtag", "Landesregier", "NRW-Regierung",
+           "Ministerpräsident", "Wüst", "Landesminister", "schwarz-grün"]
+
+[[quelle]]
+name = "franceinfo"
+feed = "https://www.francetvinfo.fr/politique.rss"
+sprache = "fr"                # für richtige Silbentrennung am Reader
+artikel = 2
+min_woerter = 250
+ausschliessen = ["/replay-radio/", "/video/", "direct"]
+
+[[quelle]]
+name = "Le Monde"
+feed = "https://www.lemonde.fr/rss/une.xml"
+sprache = "fr"
+artikel = 6
+modus = "schlagzeilen"       # Volltext sperrt Le Monde für Nicht-Abonnenten (HTTP 402)
+ausschliessen = ["/live/", "/video/"]
+
+[[quelle]]
+name = "heise online"
+feed = "https://www.heise.de/rss/heise-top-atom.xml"
+artikel = 8
+modus = "schlagzeilen"
+ausschliessen = ["heise+"]
+
+# ---------------------------------------------------------------------------
+# ZEIT-Longreads aus der wöchentlichen EPUB-Ausgabe
+# ---------------------------------------------------------------------------
+[zeit]
+aktiv = true
+ordner = "~/morgenzeitung/zeit"   # hier liegen die EPUBs (per Mail geholt oder hineinkopiert)
+pro_tag = 2
+min_woerter = 1000                # kürzer = kein Longread
+max_woerter = 2500                # länger = sprengt das Frühstück
+zaehlt_zur_lesezeit = true        # true: Nachrichten werden entsprechend kürzer
+ressorts_bevorzugt = ["Dossier", "Politik", "Wirtschaft", "Wissen", "Feuilleton"]
+
+# Optional: Ausgabe automatisch aus dem Postfach holen (nur lesend).
+# Ohne diesen Abschnitt einfach die EPUB-Datei in den Ordner oben kopieren.
+# [zeit.imap]
+# server = "imap.example.de"
+# benutzer = "leon@example.de"
+# passwort_datei = "~/.config/morgenzeitung/imap-passwort"   # chmod 600, am besten App-Passwort
+# absender_enthaelt = "zeit.de"

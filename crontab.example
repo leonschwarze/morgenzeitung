@@ -1,0 +1,4 @@
+# Mit `crontab -e` einfügen. Pfade an deine Installation anpassen.
+# 05:50 Zeitung bauen – dauert auf dem Pi 3 A+ ein paar Minuten, ist also lange vor 06:15 fertig.
+# "nice" lässt InkyPi Vorrang, ">>" schreibt alles ins Log.
+50 5 * * * cd /home/pi/morgenzeitung && nice -n 10 .venv/bin/python morgenzeitung.py >> morgenzeitung.log 2>&1
