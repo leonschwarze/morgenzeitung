@@ -10,6 +10,7 @@ Ablauf (jede Stufe ist eine eigene Funktion, damit du sie einzeln testen kannst)
 
 Aufruf:
   python morgenzeitung.py              # Ausgabe bauen
+  python morgenzeitung.py --config PFAD  # andere Konfigurationsdatei
   python morgenzeitung.py --nur-feeds  # zeigt nur, was ausgewählt würde (schnell)
 """
 import html
@@ -27,13 +28,38 @@ from layout import datum_lang
 
 log = logging.getLogger("morgenzeitung")
 HIER = Path(__file__).resolve().parent
+
+# Programm und Nutzerdaten sind getrennt (Linux-Konvention "XDG"):
+#   Programm  ~/morgenzeitung/                    ← git-Repo, wird per "git pull" ersetzt
+#   Konfig    ~/.config/morgenzeitung/            ← config.toml, IMAP-Passwort
+#   Daten     ~/.local/share/morgenzeitung/       ← Ausgaben, ZEIT-EPUBs, Log
+KONFIG_ORDNER = Path("~/.config/morgenzeitung").expanduser()
+DATEN_ORDNER = Path("~/.local/share/morgenzeitung").expanduser()
 UA = ("Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/131.0 Safari/537.36")
 
 
 # --------------------------------------------------------------------------- Konfiguration
+def config_finden(pfad=None) -> Path:
+    """Suchreihenfolge: --config PFAD → Umgebungsvariable MORGENZEITUNG_CONFIG →
+    ~/.config/morgenzeitung/config.toml → (alt) config.toml im Programmordner."""
+    import os
+    kandidaten = [pfad, os.environ.get("MORGENZEITUNG_CONFIG"), KONFIG_ORDNER / "config.toml"]
+    for k in kandidaten:
+        if k and Path(k).expanduser().exists():
+            return Path(k).expanduser()
+    alt = HIER / "config.toml"
+    if alt.exists():
+        log.warning("config.toml liegt noch im Programmordner – bitte umziehen: "
+                    "sh umzug.sh (siehe README)")
+        return alt
+    raise SystemExit(f"Keine Konfiguration gefunden. Anlegen mit:\n"
+                     f"  mkdir -p {KONFIG_ORDNER} && cp {HIER / 'config.example.toml'} "
+                     f"{KONFIG_ORDNER / 'config.toml'}")
+
+
 def lade_config(pfad=None) -> dict:
-    pfad = Path(pfad or HIER / "config.toml")
+    pfad = config_finden(pfad)
     with open(pfad, "rb") as f:
         cfg = tomllib.load(f)
     z = cfg.setdefault("zeitung", {})
@@ -42,7 +68,7 @@ def lade_config(pfad=None) -> dict:
     z.setdefault("lesezeit_minuten", 20)
     z.setdefault("woerter_pro_minute", 230)
     z.setdefault("max_alter_stunden", 20)
-    z.setdefault("ausgabe_ordner", "~/morgenzeitung/ausgaben")
+    z.setdefault("ausgabe_ordner", str(DATEN_ORDNER / "ausgaben"))
     z.setdefault("aufbewahren_tage", 7)
     for q in cfg.get("quelle", []):
         q.setdefault("artikel", 2)
@@ -295,8 +321,9 @@ def zeit_longreads(cfg: dict, heute: datetime) -> list[Artikel]:
 # --------------------------------------------------------------------------- Hauptprogramm
 def main(argv=None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
+    config_pfad = argv[argv.index("--config") + 1] if "--config" in argv else None
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    cfg = lade_config()
+    cfg = lade_config(config_pfad)
     netz = Netz()
     heute = datetime.now()
 

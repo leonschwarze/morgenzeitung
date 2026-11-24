@@ -1,5 +1,8 @@
 # Morgenzeitung – Konfiguration
-# Kopieren nach config.toml und anpassen:  cp config.example.toml config.toml
+# Diese Vorlage gehört zum Programm und wird bei "git pull" aktualisiert.
+# Deine eigene Kopie liegt außerhalb des Repos und bleibt dabei unangetastet:
+#   mkdir -p ~/.config/morgenzeitung
+#   cp config.example.toml ~/.config/morgenzeitung/config.toml
 
 [zeitung]
 titel = "Morgenzeitung"
@@ -7,7 +10,7 @@ untertitel = "Deutschland · NRW · Welt"
 lesezeit_minuten = 20        # Ziel: so lange soll die Lektüre dauern
 woerter_pro_minute = 230     # durchschnittliches Lesetempo am E-Reader
 max_alter_stunden = 20       # ältere Feed-Einträge werden ignoriert
-ausgabe_ordner = "~/morgenzeitung/ausgaben"
+ausgabe_ordner = "~/.local/share/morgenzeitung/ausgaben"
 aufbewahren_tage = 7         # ältere Ausgaben werden gelöscht
 
 # ---------------------------------------------------------------------------
@@ -64,7 +67,7 @@ ausschliessen = ["heise+"]
 # ---------------------------------------------------------------------------
 [zeit]
 aktiv = true
-ordner = "~/morgenzeitung/zeit"   # hier liegen die EPUBs (per Mail geholt oder hineinkopiert)
+ordner = "~/.local/share/morgenzeitung/zeit"   # hier liegen die EPUBs (per Mail geholt oder hineinkopiert)
 pro_tag = 2
 min_woerter = 1000                # kürzer = kein Longread
 max_woerter = 2500                # länger = sprengt das Frühstück

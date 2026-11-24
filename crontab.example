@@ -1,4 +1,4 @@
-# Mit `crontab -e` einfügen. Pfade an deine Installation anpassen.
+# Mit `crontab -e` einfügen. $HOME setzt cron selbst – kein Benutzername nötig.
 # 05:50 Zeitung bauen – dauert auf dem Pi 3 A+ ein paar Minuten, ist also lange vor 06:15 fertig.
-# "nice" lässt InkyPi Vorrang, ">>" schreibt alles ins Log.
-50 5 * * * cd /home/pi/morgenzeitung && nice -n 10 .venv/bin/python morgenzeitung.py >> morgenzeitung.log 2>&1
+# "nice" lässt InkyPi Vorrang, ">>" hängt die Ausgabe an das Log an.
+50 5 * * * cd $HOME/morgenzeitung && nice -n 10 .venv/bin/python morgenzeitung.py >> $HOME/.local/share/morgenzeitung/morgenzeitung.log 2>&1
