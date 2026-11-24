@@ -1,12 +1,12 @@
 # Morgenzeitung für den Tolino
 
-Jeden Morgen um 05:50 Uhr baut der Raspberry Pi aus Tagesschau, WDR (Bonn & Landespolitik),
-franceinfo, Le Monde und heise eine EPUB-Zeitung für ca. 20 Minuten Lektüre – plus zwei
-Longreads aus der aktuellen ZEIT-Ausgabe. Am Tolino öffnest du ein Lesezeichen, tippst auf
+Jeden Morgen um 05:50 Uhr baut der Raspberry Pi eine EPUB-Zeitung für ca. 20 Minuten Lektüre:
+die wichtigsten Artikel der SZ (immer mit der Seite Drei), dazu WDR (Bonn & Landespolitik),
+franceinfo, Le Monde und heise – plus zwei Longreads aus der aktuellen ZEIT-Ausgabe. Am Tolino öffnest du ein Lesezeichen, tippst auf
 „Heute laden“ – fertig.
 
-Keine Logins, keine Cookies, keine Cloud. Die Nachrichten kommen aus frei zugänglichen Quellen,
-die ZEIT aus der EPUB-Ausgabe, die dein Abo dir ohnehin per Mail schickt.
+SZ und ZEIT kommen aus den fertigen EPUB-Ausgaben deiner Abos, alles andere aus frei
+zugänglichen Feeds. Fehlt die SZ an einem Morgen, springt die Tagesschau ein.
 
 ## So funktioniert es
 
@@ -20,7 +20,7 @@ die ZEIT aus der EPUB-Ausgabe, die dein Abo dir ohnehin per Mail schickt.
 |---|---|
 | `morgenzeitung.py` | Nachrichten holen, auswählen, EPUB bauen |
 | `layout.py` | Gestaltung: Titelblatt, Inhaltsseite, Artikelseiten, CSS |
-| `zeit.py` | ZEIT-Ausgabe aus dem Postfach holen, zerlegen, zwei Longreads pro Tag wählen |
+| `ausgabe.py` | fertige Ausgaben (SZ, ZEIT) holen, zerlegen und Artikel nach Ressorts auswählen |
 | `config.toml` | Quellen, Lesezeit, Titel |
 | `crontab.example` | startet das Programm jeden Morgen |
 | `umzug.sh` | einmaliger Umzug der Nutzerdaten aus dem Programmordner |
@@ -41,33 +41,45 @@ die ZEIT aus der EPUB-Ausgabe, die dein Abo dir ohnehin per Mail schickt.
   kommen nur Meldungen durch, deren Titel oder Anriss eines der Stichwörter enthält (Bonn,
   Rhein-Sieg, Landtag, Landesregierung …).
 
-## ZEIT-Longreads
+## SZ und ZEIT aus den fertigen Ausgaben
 
-Ein EPUB ist ein ZIP-Archiv voller XHTML-Dateien. `zeit.py` liest das Inhaltsverzeichnis
-(daher kommen Titel und Ressort) und nimmt jede Datei als einen Artikel. Ausgewählt werden
-Texte zwischen 1.000 und 2.500 Wörtern, bevorzugt in der Reihenfolge Dossier → Politik →
-Wirtschaft → Wissen → Feuilleton, möglichst aus zwei verschiedenen Ressorts. In
-`zeit/zeit_status.json` steht, was schon dran war. Kommt eine neue Ausgabe, beginnt die
-Rotation von vorn. Eine Ausgabe reicht damit locker für die ganze Woche.
+Ein EPUB ist ein ZIP-Archiv voller XHTML-Dateien. `ausgabe.py` liest das Inhaltsverzeichnis
+(daher kommen Titel und Ressort) und nimmt jede Datei als einen Artikel. Dann wählt es nach
+denselben Regeln für beide Zeitungen, einstellbar in `[sz]` und `[zeit]`:
 
-**So kommt die Ausgabe auf den Pi:**
+1. **immer:** Was jeden Tag rein soll, unabhängig von der Länge – bei der SZ die Seite Drei.
+2. **Schwerpunkte:** Die meisten Plätze gehen an `ressorts_bevorzugt` (SZ: Politik, Wirtschaft;
+   ZEIT: Dossier, Politik, Wirtschaft), möglichst aus verschiedenen Ressorts.
+3. **Entdeckungen:** `davon_andere` Plätze für ein anderes Ressort. Es kommt das Ressort dran, das
+   am längsten nicht dran war – so wechseln sich Wissen, Feuilleton, Geschichte usw. ab.
+4. **Nie:** `ressorts_ausschliessen` (SZ: München, Bayern, Landkreise; ZEIT: Hamburg, Osten,
+   Schweiz) und `ausschliessen` (Rätsel, Leserbriefe, Impressum …).
 
-- *Automatisch:* Den Abschnitt `[zeit.imap]` in `config.toml` ausfüllen. Das Programm schaut jeden
-  Morgen nur lesend ins Postfach und holt neue `.epub`-Anhänge vom Absender `zeit.de`.
+In `status.json` im jeweiligen Ordner steht, was schon dran war. Die ZEIT reicht so für die ganze
+Woche, bei der SZ beginnt mit jeder neuen Tagesausgabe die Auswahl von vorn.
+
+**So kommen die Ausgaben auf den Pi:**
+
+- *ZEIT automatisch:* Den Abschnitt `[zeit.imap]` in `config.toml` ausfüllen. Das Programm schaut
+  jeden Morgen nur lesend ins Postfach und holt neue `.epub`-Anhänge vom Absender `zeit.de`.
   Nimm ein App-Passwort, wenn dein Mailanbieter das anbietet, und schütze die Datei:
   `chmod 600 ~/.config/morgenzeitung/imap-passwort`.
-- *Von Hand:* Die EPUB-Datei einfach nach `~/.local/share/morgenzeitung/zeit/` kopieren.
+- *SZ:* Der automatische Download von reader.sueddeutsche.de ist noch nicht eingebaut. Bis dahin
+  die EPUB-Datei nach `~/.local/share/morgenzeitung/sz/` kopieren.
+- *Von Hand:* Jede EPUB-Datei kann einfach in den passenden Ordner kopiert werden.
 
-**Lesezeit:** Mit `zaehlt_zur_lesezeit = true` werden die Longreads auf die 20 Minuten
-angerechnet, und es kommen entsprechend weniger Nachrichten. Ein Drittel des Budgets bleibt immer
-für Nachrichten reserviert. Mit `false` kommen die Longreads obendrauf.
+**Lesezeit:** Mit `zaehlt_zur_lesezeit = true` werden SZ und ZEIT auf die 20 Minuten angerechnet,
+die Feeds füllen den Rest. Ein Viertel des Budgets bleibt immer für die Feeds reserviert.
 
-**Erster Test mit deiner echten Ausgabe:**
+**Prüfen, wie eine echte Ausgabe zerlegt wird:**
 
 ```bash
-.venv/bin/python -c "import zeit; [print(a['woerter'], a['ressort'], '|', a['titel']) \
-  for a in zeit.artikel_lesen(__import__('pathlib').Path.home() / '.local/share/morgenzeitung/zeit/DATEINAME.epub')]"
+.venv/bin/python ausgabe.py ~/.local/share/morgenzeitung/sz/DATEINAME.epub
 ```
+
+Das zeigt Wortzahl, Ressort und Titel jedes erkannten Artikels. Stimmen die Ressort-Namen nicht
+mit denen in `config.toml` überein (z. B. „Die Seite Drei“ statt „Seite Drei“), passt du dort die
+Listen an – es genügt ein Teil des Namens.
 
 Damit siehst du, ob Titel, Ressorts und Wortzahlen sinnvoll erkannt werden. Falls nicht, schick
 mir die Ausgabe dieses Befehls (nicht das EPUB selbst), dann passe ich die Zerlegung an.
@@ -97,7 +109,7 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 mkdir -p ~/.config/morgenzeitung
 cp config.example.toml ~/.config/morgenzeitung/config.toml   # dann anpassen
-.venv/bin/python -m pytest -q          # sollte "12 passed" melden
+.venv/bin/python -m pytest -q          # sollte "14 passed" melden
 ```
 
 **Erster Lauf von Hand:**

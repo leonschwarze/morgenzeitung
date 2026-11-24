@@ -160,3 +160,31 @@ def test_config_suchreihenfolge(tmp_path, monkeypatch):
     monkeypatch.setenv("MORGENZEITUNG_CONFIG", str(b))
     assert mz.config_finden() == b
     assert mz.config_finden(str(a)) == a
+
+
+def test_sz_ersetzt_tagesschau(tmp_path, monkeypatch):
+    """Liegt eine SZ-Ausgabe vor, fällt die Ersatzquelle weg – sonst springt sie ein."""
+    import test_ausgabe
+    aufrufe = []
+    echte_lade_config = mz.lade_config
+
+    class ZaehlNetz(FakeNetz):
+        def holen(self, url):
+            aufrufe.append(url)
+            return super().holen(url)
+
+    def lauf(mit_sz):
+        aufrufe.clear()
+        monkeypatch.setattr(mz, "lade_config", echte_lade_config)
+        cfg = config(tmp_path)
+        cfg["quelle"][1]["ersatz_fuer"] = "sz"              # Tagesschau
+        cfg["sz"] = {"aktiv": True, "ordner": str(tmp_path / ("sz" if mit_sz else "leer"))}
+        monkeypatch.setattr(mz, "lade_config", lambda *a: cfg)
+        monkeypatch.setattr(mz, "Netz", ZaehlNetz)
+        assert mz.main([]) == 0
+        return any("ts.example" in u for u in aufrufe)
+
+    test_ausgabe.mini_ausgabe(tmp_path / "sz", "SZ.epub", {
+        "Seite Drei": [("Reportage", 2000)], "Politik": [("Haushalt", 600)]})
+    assert lauf(mit_sz=True) is False
+    assert lauf(mit_sz=False) is True

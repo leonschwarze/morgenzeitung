@@ -20,12 +20,14 @@ aufbewahren_tage = 7         # ältere Ausgaben werden gelöscht
 #   min_woerter   = kürzere Texte fliegen raus (z. B. Paywall-Teaser bei Le Monde)
 #   ausschliessen = Wörter im Titel oder in der URL, die übersprungen werden
 #   sprache       = "de" oder "fr" (Silbentrennung am Reader)
+#   ersatz_fuer   = "sz": Quelle springt nur ein, wenn die SZ-Ausgabe fehlt
 #   nur_mit       = nur Einträge, deren Titel oder Anriss eines dieser Wörter enthält
 # ---------------------------------------------------------------------------
 
 [[quelle]]
 name = "Tagesschau"
 feed = "https://www.tagesschau.de/index~rss2.xml"
+ersatz_fuer = "sz"            # nur dabei, wenn heute keine SZ-Ausgabe vorliegt
 artikel = 6
 min_woerter = 120
 ausschliessen = ["liveblog", "/video/", "/multimedia/"]
@@ -63,16 +65,40 @@ modus = "schlagzeilen"
 ausschliessen = ["heise+"]
 
 # ---------------------------------------------------------------------------
-# ZEIT-Longreads aus der wöchentlichen EPUB-Ausgabe
+# Fertige Ausgaben als EPUB: SZ (täglich, Hauptquelle) und ZEIT (wöchentlich, Longreads)
+#
+# Auswahlregeln, für beide gleich:
+#   immer                  = Ressorts/Titel, die jeden Tag rein sollen (unabhängig von der Länge)
+#   ressorts_bevorzugt     = Schwerpunkte, füllen die meisten Plätze
+#   davon_andere           = so viele Plätze für Entdeckungen aus übrigen Ressorts
+#   ressorts_ausschliessen = Ressorts, die nie vorkommen (z. B. Lokalteile)
+#   ausschliessen          = Wörter im Titel/Ressort, die nie vorkommen
+# Welche Ressort-Namen eine Ausgabe wirklich verwendet, zeigt der Testbefehl in der README.
 # ---------------------------------------------------------------------------
+[sz]
+aktiv = true
+ordner = "~/.local/share/morgenzeitung/sz"     # hier landet die tägliche EPUB-Ausgabe
+pro_tag = 5
+davon_andere = 1
+min_woerter = 250
+max_woerter = 2000
+zaehlt_zur_lesezeit = true
+immer = ["Seite Drei", "Seite 3"]
+ressorts_bevorzugt = ["Politik", "Wirtschaft"]
+ressorts_ausschliessen = ["München", "Bayern", "Region", "Landkreis", "Dachau", "Ebersberg",
+                          "Erding", "Freising", "Fürstenfeldbruck", "Starnberg",
+                          "Wolfratshausen", "Bad Tölz"]
+
 [zeit]
 aktiv = true
 ordner = "~/.local/share/morgenzeitung/zeit"   # hier liegen die EPUBs (per Mail geholt oder hineinkopiert)
 pro_tag = 2
+davon_andere = 1                  # 1 Schwerpunkt-Text + 1 Entdeckung aus einem anderen Ressort
 min_woerter = 1000                # kürzer = kein Longread
 max_woerter = 2500                # länger = sprengt das Frühstück
 zaehlt_zur_lesezeit = true        # true: Nachrichten werden entsprechend kürzer
-ressorts_bevorzugt = ["Dossier", "Politik", "Wirtschaft", "Wissen", "Feuilleton"]
+ressorts_bevorzugt = ["Dossier", "Politik", "Wirtschaft"]
+ressorts_ausschliessen = ["Hamburg", "Osten", "Schweiz"]
 
 # Optional: Ausgabe automatisch aus dem Postfach holen (nur lesend).
 # Ohne diesen Abschnitt einfach die EPUB-Datei in den Ordner oben kopieren.

@@ -299,22 +299,29 @@ h2 {{ font-size: 1em; margin-top: 2em; border-bottom: 1px solid #000; }}
     (ordner / "index.html").write_text(seite, encoding="utf-8")
 
 
-def zeit_longreads(cfg: dict, heute: datetime) -> list[Artikel]:
-    import zeit
-    zc = zeit.standard(cfg)
-    if not zc["aktiv"]:
+AUSGABEN = {                       # Abschnitt in config.toml → Bezeichnung in der Zeitung
+    "sz": "Süddeutsche Zeitung",
+    "zeit": "Die ZEIT · Lange Lektüre",
+}
+
+
+def ausgabe_artikel(cfg: dict, abschnitt: str, heute: datetime) -> list[Artikel]:
+    """Artikel aus einer fertigen EPUB-Ausgabe (SZ oder ZEIT) – siehe ausgabe.py."""
+    import ausgabe
+    ac = ausgabe.standard(cfg, abschnitt)
+    if not ac["aktiv"]:
         return []
     try:
-        zeit.mails_abholen(zc)
+        ausgabe.mails_abholen(ac)
     except Exception as e:                     # Postfach weg? Dann eben die vorhandene Ausgabe
-        log.warning("ZEIT: Postfach nicht abrufbar (%s)", e)
+        log.warning("%s: Postfach nicht abrufbar (%s)", ac["name"], e)
     try:
-        status = Path(zc["ordner"]).expanduser() / "zeit_status.json"
-        gewaehlt = zeit.longreads_fuer_heute(zc, status, heute.strftime("%Y-%m-%d"))
+        status = Path(ac["ordner"]).expanduser() / "status.json"
+        gewaehlt = ausgabe.auswahl_fuer_heute(ac, status, heute.strftime("%Y-%m-%d"))
     except Exception as e:
-        log.warning("ZEIT: Ausgabe nicht lesbar (%s)", e)
+        log.warning("%s: Ausgabe nicht lesbar (%s)", ac["name"], e)
         return []
-    return [Artikel("Die ZEIT · Lange Lektüre", a["titel"], "", None, html=a["html"],
+    return [Artikel(AUSGABEN[abschnitt], a["titel"], "", None, html=a["html"],
                     woerter=a["woerter"], ressort=a["ressort"]) for a in gewaehlt]
 
 
@@ -327,6 +334,17 @@ def main(argv=None) -> int:
     netz = Netz()
     heute = datetime.now()
 
+    # 1. Fertige Ausgaben zuerst: Die SZ ist Hauptquelle, die ZEIT liefert Longreads.
+    #    Beide verkleinern (falls zaehlt_zur_lesezeit) das Budget für die Feeds.
+    sz = ausgabe_artikel(cfg, "sz", heute)
+    longreads = ausgabe_artikel(cfg, "zeit", heute)
+
+    # 2. Ersatzquellen (z. B. Tagesschau mit ersatz_fuer = "sz") nur, wenn die SZ fehlt
+    if sz:
+        cfg["quelle"] = [q for q in cfg["quelle"] if q.get("ersatz_fuer") != "sz"]
+    elif any(q.get("ersatz_fuer") == "sz" for q in cfg["quelle"]) and cfg["sz"]["aktiv"]:
+        log.warning("SZ fehlt heute – Ersatzquelle springt ein")
+
     kandidaten = kandidaten_sammeln(cfg, netz)
     if "--nur-feeds" in argv:
         for name, liste in kandidaten.items():
@@ -335,13 +353,13 @@ def main(argv=None) -> int:
                 print(f"  {a.zeit:%H:%M}  {a.titel[:80]}" if a.zeit else f"  {a.titel[:80]}")
         return 0
 
-    # ZEIT-Longreads zuerst bestimmen: Sie verkleinern (optional) das Budget für die Nachrichten
     z = cfg["zeitung"]
     budget = z["lesezeit_minuten"] * z["woerter_pro_minute"]
-    longreads = zeit_longreads(cfg, heute)
-    if longreads and cfg["zeit"]["zaehlt_zur_lesezeit"]:
-        budget = max(budget - sum(a.woerter for a in longreads), budget // 3)
-    auswahl = auswaehlen(cfg, kandidaten, netz, budget) + longreads
+    for teil, abschnitt in ((sz, "sz"), (longreads, "zeit")):
+        if teil and cfg[abschnitt]["zaehlt_zur_lesezeit"]:
+            budget -= sum(a.woerter for a in teil)
+    budget = max(budget, z["lesezeit_minuten"] * z["woerter_pro_minute"] // 4)
+    auswahl = sz + auswaehlen(cfg, kandidaten, netz, budget) + longreads
     if not auswahl:
         log.error("Keine Artikel – Abbruch (Netz weg?)")
         return 1

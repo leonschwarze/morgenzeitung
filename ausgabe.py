@@ -1,10 +1,13 @@
-"""ZEIT-Longreads: die Wochenausgabe (EPUB) zerlegen und täglich zwei Artikel liefern.
+"""Fertige Zeitungsausgaben als EPUB (ZEIT, SZ) zerlegen und Artikel für heute auswählen.
 
 Ablauf:
-  1. mails_abholen()   neue ZEIT-EPUBs per IMAP aus dem Postfach holen (optional)
-  2. artikel_lesen()   die neueste Ausgabe in einzelne Artikel zerlegen
-  3. longreads_fuer_heute()  zwei noch nicht gelesene Artikel auswählen und
-                       in zeit_status.json vermerken, damit nichts doppelt kommt
+  1. mails_abholen()        neue EPUBs per IMAP aus dem Postfach holen (optional)
+  2. artikel_lesen()        die neueste Ausgabe in einzelne Artikel zerlegen
+  3. auswahl_fuer_heute()   Artikel nach Ressort-Regeln auswählen und in
+                            <ordner>/status.json vermerken, damit nichts doppelt kommt
+
+Dieselben Funktionen bedienen [zeit] und [sz] in der Konfiguration – nur die
+Regeln (welche Ressorts, wie viele Artikel) unterscheiden sich.
 
 Ein EPUB ist nur ein ZIP-Archiv mit XHTML-Dateien. Die Datei content.opf
 legt die Lesereihenfolge fest (der "spine"), das Inhaltsverzeichnis (nav.xhtml
@@ -28,24 +31,52 @@ from zipfile import ZipFile
 from lxml import etree
 from lxml import html as lh
 
-log = logging.getLogger("morgenzeitung.zeit")
+log = logging.getLogger("morgenzeitung.ausgabe")
 
 NS = {"opf": "http://www.idpf.org/2007/opf", "c": "urn:oasis:names:tc:opendocument:xmlns:container",
       "ncx": "http://www.daisy.org/z3986/2005/ncx/", "x": "http://www.w3.org/1999/xhtml",
       "ops": "http://www.idpf.org/2007/ops"}
 
 
-def standard(cfg: dict) -> dict:
-    z = cfg.setdefault("zeit", {})
+STANDARDS = {
+    "zeit": {
+        "name": "ZEIT",
+        "ordner": "~/.local/share/morgenzeitung/zeit",
+        "pro_tag": 2,
+        "davon_andere": 1,          # so viele "Entdeckungen" aus nicht bevorzugten Ressorts
+        "min_woerter": 1000,
+        "max_woerter": 2500,
+        "zaehlt_zur_lesezeit": True,
+        "immer": [],
+        "ressorts_bevorzugt": ["Dossier", "Politik", "Wirtschaft"],
+        "ressorts_ausschliessen": ["Hamburg", "Osten", "Schweiz"],
+        "ausschliessen": ["Leserbrief", "Impressum", "Inhalt", "Rätsel", "Kreuzwort", "Anzeige",
+                          "Chancen", "Stellenmarkt", "Was bisher geschah"],
+    },
+    "sz": {
+        "name": "SZ",
+        "ordner": "~/.local/share/morgenzeitung/sz",
+        "pro_tag": 5,
+        "davon_andere": 1,
+        "min_woerter": 250,
+        "max_woerter": 2000,
+        "zaehlt_zur_lesezeit": True,
+        "immer": ["Seite Drei", "Seite 3"],
+        "ressorts_bevorzugt": ["Politik", "Wirtschaft"],
+        "ressorts_ausschliessen": ["München", "Bayern", "Region", "Landkreis", "Dachau", "Ebersberg",
+                                   "Erding", "Freising", "Fürstenfeldbruck", "Starnberg",
+                                   "Wolfratshausen", "Bad Tölz"],
+        "ausschliessen": ["Impressum", "Inhalt", "Rätsel", "Kreuzwort", "Anzeige", "Traueranzeige",
+                          "Fernsehprogramm", "TV-Programm", "Wetter"],
+    },
+}
+
+
+def standard(cfg: dict, abschnitt: str = "zeit") -> dict:
+    z = cfg.setdefault(abschnitt, {})
     z.setdefault("aktiv", False)
-    z.setdefault("ordner", "~/.local/share/morgenzeitung/zeit")
-    z.setdefault("pro_tag", 2)
-    z.setdefault("min_woerter", 1000)
-    z.setdefault("max_woerter", 2500)
-    z.setdefault("zaehlt_zur_lesezeit", True)
-    z.setdefault("ressorts_bevorzugt", ["Dossier", "Politik", "Wirtschaft", "Wissen", "Feuilleton"])
-    z.setdefault("ausschliessen", ["Leserbrief", "Impressum", "Inhalt", "Rätsel", "Kreuzwort",
-                                   "Anzeige", "Chancen", "Stellenmarkt", "Was bisher geschah"])
+    for k, v in STANDARDS[abschnitt].items():
+        z.setdefault(k, list(v) if isinstance(v, list) else v)
     z.setdefault("imap", {})
     return z
 
@@ -202,48 +233,99 @@ def neueste_ausgabe(z: dict) -> Path | None:
     return dateien[-1] if dateien else None
 
 
-def longreads_fuer_heute(z: dict, status_datei: Path, heute: str) -> list[dict]:
-    """Wählt pro Tag z['pro_tag'] Artikel. Wird das Programm am selben Tag
-    zweimal gestartet, kommen dieselben Artikel – nichts wird 'verbraucht'."""
+def _passt(text: str, muster: list[str]) -> bool:
+    text = text.lower()
+    return any(m.lower() in text for m in muster)
+
+
+def auswahl_fuer_heute(z: dict, status_datei: Path, heute: str) -> list[dict]:
+    """Wählt die Artikel für heute nach diesen Regeln:
+
+      1. "immer"   – Ressorts/Titel, die jeden Tag rein sollen (z. B. Seite Drei),
+                     unabhängig von der Länge
+      2. bevorzugt – die übrigen Plätze aus den Schwerpunkt-Ressorts,
+                     möglichst aus verschiedenen Ressorts
+      3. "andere"  – davon_andere Plätze für Entdeckungen aus anderen Ressorts;
+                     es kommt das Ressort dran, das am längsten nicht dran war
+
+    Wird das Programm am selben Tag zweimal gestartet, kommen dieselben Artikel."""
     ausgabe = neueste_ausgabe(z)
     if ausgabe is None:
-        log.info("ZEIT: noch keine Ausgabe im Ordner")
+        log.info("%s: noch keine Ausgabe im Ordner", z["name"])
         return []
     status = json.loads(status_datei.read_text()) if status_datei.exists() else {}
-    if status.get("ausgabe") != ausgabe.name:              # neue Woche → von vorn
-        status = {"ausgabe": ausgabe.name, "tage": {}}
+    if status.get("ausgabe") != ausgabe.name:              # neue Ausgabe → von vorn
+        status = {"ausgabe": ausgabe.name, "tage": {}, "ressorts_zuletzt": status.get("ressorts_zuletzt", {})}
+    status.setdefault("ressorts_zuletzt", {})
 
     alle = {a["id"]: a for a in artikel_lesen(ausgabe)}
     if heute in status["tage"]:
         return [alle[i] for i in status["tage"][heute] if i in alle]
 
     benutzt = {i for ids in status["tage"].values() for i in ids}
-    muster = [m.lower() for m in z["ausschliessen"]]
-    kandidaten = [a for a in alle.values()
-                  if a["id"] not in benutzt
-                  and z["min_woerter"] <= a["woerter"] <= z["max_woerter"]
-                  and not any(m in (a["titel"] + " " + a["ressort"]).lower() for m in muster)]
+    frei = [a for a in alle.values()
+            if a["id"] not in benutzt
+            and not _passt(a["ressort"], z["ressorts_ausschliessen"])
+            and not _passt(a["titel"] + " " + a["ressort"], z["ausschliessen"])
+            and a["woerter"] > 0]
+
+    # 1. immer dabei – höchstens ein Artikel pro Muster
+    auswahl = []
+    for m in z["immer"]:
+        treffer = [a for a in frei if _passt(a["ressort"] + " " + a["titel"], [m]) and a not in auswahl]
+        schon_da = any(_passt(b["ressort"] + " " + b["titel"], [m]) for b in auswahl)
+        if treffer and not schon_da:
+            auswahl.append(max(treffer, key=lambda a: a["woerter"]))
+
+    laenge_ok = [a for a in frei if a not in auswahl
+                 and z["min_woerter"] <= a["woerter"] <= z["max_woerter"]]
+    bevorzugt = [a for a in laenge_ok if _passt(a["ressort"], z["ressorts_bevorzugt"])]
+    andere = [a for a in laenge_ok if a not in bevorzugt]
     rang = {r.lower(): i for i, r in enumerate(z["ressorts_bevorzugt"])}
-    kandidaten.sort(key=lambda a: rang.get(a["ressort"].lower(), len(rang)))
+    bevorzugt.sort(key=lambda a: min((i for r, i in rang.items() if r in a["ressort"].lower()),
+                                     default=len(rang)))
 
-    # Möglichst aus verschiedenen Ressorts – sonst zwei Politik-Texte hintereinander
-    auswahl, ressorts = [], set()
-    for a in kandidaten:
-        if a["ressort"] not in ressorts or not a["ressort"]:
-            auswahl.append(a)
-            ressorts.add(a["ressort"])
-        if len(auswahl) == z["pro_tag"]:
-            break
-    for a in kandidaten:                                   # auffüllen, falls Ressorts knapp
-        if len(auswahl) == z["pro_tag"]:
-            break
-        if a not in auswahl:
-            auswahl.append(a)
+    def verschiedene(liste, anzahl):
+        """Erst ein Artikel pro Ressort, dann auffüllen."""
+        gewaehlt, ressorts = [], set()
+        for a in liste:
+            if len(gewaehlt) == anzahl:
+                break
+            if a["ressort"] not in ressorts:
+                gewaehlt.append(a)
+                ressorts.add(a["ressort"])
+        for a in liste:
+            if len(gewaehlt) == anzahl:
+                break
+            if a not in gewaehlt:
+                gewaehlt.append(a)
+        return gewaehlt
 
+    plaetze = max(0, z["pro_tag"] - len(auswahl))
+    n_andere = min(z["davon_andere"], plaetze)
+    # 3. Entdeckungen: Ressort, das am längsten nicht dran war; darin der längste Text
+    zuletzt = status["ressorts_zuletzt"]
+    andere.sort(key=lambda a: (zuletzt.get(a["ressort"], ""), -a["woerter"]))
+    entdeckungen = verschiedene(andere, n_andere)
+    # 2. Schwerpunkte
+    schwerpunkte = verschiedene(bevorzugt, plaetze - len(entdeckungen))
+    auswahl += schwerpunkte + entdeckungen
+    if len(auswahl) < z["pro_tag"]:                        # zu wenig Schwerpunkt-Texte → auffüllen
+        auswahl += [a for a in andere if a not in auswahl][: z["pro_tag"] - len(auswahl)]
+
+    for a in auswahl:
+        zuletzt[a["ressort"]] = heute
     status["tage"][heute] = [a["id"] for a in auswahl]
     status_datei.parent.mkdir(parents=True, exist_ok=True)
     status_datei.write_text(json.dumps(status, indent=2, ensure_ascii=False))
-    rest = len(kandidaten) - len(auswahl)
-    log.info("ZEIT: %d Longreads (%s), noch %d unbenutzte in dieser Ausgabe",
-             len(auswahl), ", ".join(a["titel"][:40] for a in auswahl), rest)
+    log.info("%s: %d Artikel – %s", z["name"], len(auswahl),
+             "; ".join(f"{a['ressort'] or '?'}: {a['titel'][:35]}" for a in auswahl))
     return auswahl
+
+
+if __name__ == "__main__":
+    # Prüfbefehl: zeigt, wie eine Ausgabe zerlegt wird – Wortzahl, Ressort, Titel.
+    #   .venv/bin/python ausgabe.py ~/.local/share/morgenzeitung/sz/DATEI.epub
+    import sys
+    for a in artikel_lesen(Path(sys.argv[1]).expanduser()):
+        print(f"{a['woerter']:>6}  {a['ressort'][:22]:<22}  {a['titel'][:70]}")
