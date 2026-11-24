@@ -107,6 +107,14 @@ ressorts_ausschliessen = ["München", "Bayern", "Region", "Landkreis", "Dachau",
                           "Erding", "Freising", "Fürstenfeldbruck", "Starnberg",
                           "Wolfratshausen", "Bad Tölz"]
 
+# Optional: Ausgabe aus einem Nextcloud-Ordner holen (nur lesend, per WebDAV).
+# EPUB unterwegs in den Ordner hochladen – der Pi holt sie beim nächsten Lauf ab.
+# [sz.nextcloud]
+# server = "https://cloud.example.de"
+# benutzer = "leon"
+# pfad = "Morgenzeitung/SZ"
+# passwort_datei = "~/.config/morgenzeitung/nextcloud-passwort"   # chmod 600, App-Passwort
+
 [zeit]
 aktiv = true
 bereich = "Lange Lektüre"
@@ -127,3 +135,10 @@ ressorts_ausschliessen = ["Hamburg", "Osten", "Schweiz", "Österreich"]
 # benutzer = "leon@example.de"
 # passwort_datei = "~/.config/morgenzeitung/imap-passwort"   # chmod 600, am besten App-Passwort
 # absender_enthaelt = "zeit.de"
+
+# Optional: wie bei der SZ aus einem Nextcloud-Ordner (geht auch zusätzlich zum Postfach).
+# [zeit.nextcloud]
+# server = "https://cloud.example.de"
+# benutzer = "leon"
+# pfad = "Morgenzeitung/ZEIT"
+# passwort_datei = "~/.config/morgenzeitung/nextcloud-passwort"   # dieselbe Datei wie bei der SZ

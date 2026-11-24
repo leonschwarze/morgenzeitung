@@ -2,6 +2,7 @@
 
 Ablauf:
   1. mails_abholen()        neue EPUBs per IMAP aus dem Postfach holen (optional)
+     nextcloud_abholen()    neue EPUBs per WebDAV aus einem Nextcloud-Ordner holen (optional)
   2. artikel_lesen()        die neueste Ausgabe in einzelne Artikel zerlegen
   3. auswahl_fuer_heute()   Artikel nach Ressort-Regeln auswählen und in
                             <ordner>/status.json vermerken, damit nichts doppelt kommt
@@ -20,12 +21,14 @@ import html
 import imaplib
 import json
 import logging
+import os
 import posixpath
 import re
 from copy import deepcopy
 from datetime import datetime, timedelta
+from email.utils import parsedate_to_datetime
 from pathlib import Path
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 from zipfile import ZipFile
 
 from lxml import etree
@@ -84,6 +87,7 @@ def standard(cfg: dict, abschnitt: str = "zeit") -> dict:
     for k, v in STANDARDS[abschnitt].items():
         z.setdefault(k, list(v) if isinstance(v, list) else v)
     z.setdefault("imap", {})
+    z.setdefault("nextcloud", {})
     return z
 
 
@@ -116,6 +120,67 @@ def mails_abholen(z: dict) -> int:
                     ziel.write_bytes(teil.get_payload(decode=True))
                     log.info("ZEIT-Ausgabe aus dem Postfach geholt: %s", ziel.name)
                     neu += 1
+    return neu
+
+
+# --------------------------------------------------------------------------- 1b. Nextcloud
+def _webdav_url(nc: dict) -> str:
+    """https://cloud.example.de + leon + Morgenzeitung/SZ
+    → https://cloud.example.de/remote.php/dav/files/leon/Morgenzeitung/SZ/"""
+    pfad = "/".join(quote(teil) for teil in nc["pfad"].strip("/").split("/"))
+    return f'{nc["server"].rstrip("/")}/remote.php/dav/files/{quote(nc["benutzer"])}/{pfad}/'
+
+
+def _webdav_liste(url: str, auth, timeout: int) -> list[tuple[str, int, float]]:
+    """Fragt per PROPFIND den Ordnerinhalt ab: (Dateiname, Größe, Änderungszeit) je EPUB.
+    "Depth: 1" heißt: nur der Ordner selbst und seine direkten Einträge, keine Unterordner."""
+    import requests
+    abfrage = (b'<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop>'
+               b'<d:getlastmodified/><d:getcontentlength/></d:prop></d:propfind>')
+    r = requests.request("PROPFIND", url, data=abfrage, auth=auth, timeout=timeout,
+                         headers={"Depth": "1", "Content-Type": "application/xml"})
+    r.raise_for_status()
+    dateien = []
+    for antwort in etree.fromstring(r.content).iterfind("{DAV:}response"):
+        name = unquote(antwort.findtext("{DAV:}href", "").rstrip("/").rsplit("/", 1)[-1])
+        if not name.lower().endswith(".epub"):
+            continue
+        groesse = int(antwort.findtext(".//{DAV:}getcontentlength") or 0)
+        geaendert = parsedate_to_datetime(antwort.findtext(".//{DAV:}getlastmodified")).timestamp()
+        dateien.append((name, groesse, geaendert))
+    return dateien
+
+
+def nextcloud_abholen(z: dict) -> int:
+    """Lädt EPUBs der letzten 10 Tage aus einem Nextcloud-Ordner (nur lesend).
+    Jede Datei bekommt lokal die Änderungszeit vom Server – so stimmt die Reihenfolge,
+    nach der neueste_ausgabe() die aktuelle Ausgabe erkennt, auch wenn mehrere auf einmal kommen."""
+    nc = z["nextcloud"]
+    if not nc.get("server"):
+        return 0
+    import requests
+    ordner = Path(z["ordner"]).expanduser()
+    ordner.mkdir(parents=True, exist_ok=True)
+    passwort = Path(nc.get("passwort_datei", "~/.config/morgenzeitung/nextcloud-passwort")
+                    ).expanduser().read_text().strip()
+    auth, timeout = (nc["benutzer"], passwort), nc.get("timeout", 60)
+    url = _webdav_url(nc)
+    grenze = (datetime.now() - timedelta(days=10)).timestamp()
+    neu = 0
+    for name, groesse, geaendert in _webdav_liste(url, auth, timeout):
+        ziel = ordner / name.replace("/", "_")
+        if geaendert < grenze:
+            continue
+        if ziel.exists() and ziel.stat().st_size == groesse and ziel.stat().st_mtime >= geaendert:
+            continue                                     # schon da und unverändert
+        r = requests.get(url + quote(name), auth=auth, timeout=timeout)
+        r.raise_for_status()
+        teil = ziel.with_name(ziel.name + ".teil")       # erst vollständig laden, dann umbenennen:
+        teil.write_bytes(r.content)                      # ein Abbruch hinterlässt kein kaputtes EPUB
+        os.utime(teil, (geaendert, geaendert))
+        teil.replace(ziel)
+        log.info("%s-Ausgabe aus der Nextcloud geholt: %s", z["name"], name)
+        neu += 1
     return neu
 
 

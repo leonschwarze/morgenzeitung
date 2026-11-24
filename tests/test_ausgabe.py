@@ -160,6 +160,55 @@ def test_mails_abholen(tmp_path, monkeypatch):
     assert zeit.mails_abholen(z) == 0                    # schon da → nicht doppelt
 
 
+def test_nextcloud_abholen(tmp_path, monkeypatch):
+    """Ein gefälschter Nextcloud-Ordner mit einem neuen und einem zu alten EPUB."""
+    import os
+    import requests
+    from email.utils import format_datetime
+    from datetime import datetime, timedelta, timezone
+    jetzt = datetime.now(timezone.utc).replace(microsecond=0)
+    alt = jetzt - timedelta(days=30)
+    basis = "/remote.php/dav/files/leon/Morgenzeitung/SZ%20Ausgaben/"
+    liste = f"""<?xml version="1.0"?><d:multistatus xmlns:d="DAV:">
+      <d:response><d:href>{basis}</d:href><d:propstat><d:prop>
+        <d:getlastmodified>{format_datetime(jetzt, usegmt=True)}</d:getlastmodified></d:prop></d:propstat></d:response>
+      <d:response><d:href>{basis}SZ%2024.11.epub</d:href><d:propstat><d:prop>
+        <d:getlastmodified>{format_datetime(jetzt, usegmt=True)}</d:getlastmodified>
+        <d:getcontentlength>7</d:getcontentlength></d:prop></d:propstat></d:response>
+      <d:response><d:href>{basis}SZ%20alt.epub</d:href><d:propstat><d:prop>
+        <d:getlastmodified>{format_datetime(alt, usegmt=True)}</d:getlastmodified>
+        <d:getcontentlength>7</d:getcontentlength></d:prop></d:propstat></d:response>
+    </d:multistatus>""".encode()
+    aufrufe = []
+
+    class Antwort:
+        def __init__(self, inhalt): self.content = inhalt
+        def raise_for_status(self): pass
+
+    def anfrage(methode, url, **kw):
+        aufrufe.append((methode, url))
+        assert kw["auth"] == ("leon", "geheim")
+        assert url.startswith("https://cloud.test/remote.php/dav/files/leon/Morgenzeitung/SZ%20Ausgaben/")
+        if methode == "PROPFIND":
+            assert kw["headers"]["Depth"] == "1"
+            return Antwort(liste)
+        return Antwort(b"PK-epub")
+
+    monkeypatch.setattr(requests, "request", anfrage)
+    monkeypatch.setattr(requests, "get", lambda url, **kw: anfrage("GET", url, **kw))
+    (tmp_path / "pw").write_text("geheim\n")
+    z = zeit.standard({"sz": {"ordner": str(tmp_path / "sz"), "nextcloud": {
+        "server": "https://cloud.test/", "benutzer": "leon", "pfad": "/Morgenzeitung/SZ Ausgaben",
+        "passwort_datei": str(tmp_path / "pw")}}}, "sz")
+    assert zeit.nextcloud_abholen(z) == 1                # das alte EPUB bleibt liegen
+    datei = tmp_path / "sz" / "SZ 24.11.epub"
+    assert datei.read_bytes() == b"PK-epub"
+    assert int(datei.stat().st_mtime) == int(jetzt.timestamp())   # Zeit vom Server übernommen
+    assert not list((tmp_path / "sz").glob("*.teil"))
+    assert ("GET", "https://cloud.test" + basis + "SZ%2024.11.epub") in aufrufe
+    assert zeit.nextcloud_abholen(z) == 0                # schon da → nicht doppelt
+
+
 def test_sz_seite_drei_immer_und_kein_lokalteil(tmp_path):
     """SZ: Seite Drei kommt immer – auch wenn sie länger als max_woerter ist –,
     München und Bayern nie, Politik und Wirtschaft bevorzugt."""

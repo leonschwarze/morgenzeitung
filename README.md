@@ -99,6 +99,14 @@ Woche, bei der SZ beginnt mit jeder neuen Tagesausgabe die Auswahl von vorn.
   jeden Morgen nur lesend ins Postfach und holt neue `.epub`-Anhänge vom Absender `zeit.de`.
   Nimm ein App-Passwort, wenn dein Mailanbieter das anbietet, und schütze die Datei:
   `chmod 600 ~/.config/morgenzeitung/imap-passwort`.
+- *Aus der Nextcloud (SZ und ZEIT):* Den Abschnitt `[sz.nextcloud]` bzw. `[zeit.nextcloud]`
+  ausfüllen und die EPUBs unterwegs in die Ordner `Morgenzeitung/SZ` und `Morgenzeitung/ZEIT`
+  hochladen. Das Programm fragt die Ordner jeden Morgen per WebDAV ab (nur lesend) und lädt
+  neue oder geänderte EPUBs der letzten 10 Tage herunter. Für das Passwort in der Nextcloud unter
+  *Einstellungen → Sicherheit* ein App-Passwort anlegen, in
+  `~/.config/morgenzeitung/nextcloud-passwort` speichern und schützen:
+  `chmod 600 ~/.config/morgenzeitung/nextcloud-passwort`. `benutzer` ist der Nextcloud-Benutzername
+  (steht in den WebDAV-Einstellungen unten links in der Dateien-App).
 - *SZ:* Der automatische Download von reader.sueddeutsche.de ist noch nicht eingebaut. Bis dahin
   die EPUB-Datei nach `~/.local/share/morgenzeitung/sz/` kopieren.
 - *Von Hand:* Jede EPUB-Datei kann einfach in den passenden Ordner kopiert werden.
@@ -128,7 +136,7 @@ aktualisieren, ohne dass deine Einstellungen oder Ausgaben angefasst werden.
 | Ort | Inhalt | Wer ändert es? |
 |---|---|---|
 | `~/morgenzeitung/` | Programm (das git-Repo) und `.venv` | `git pull` |
-| `~/.config/morgenzeitung/` | `config.toml`, `imap-passwort` | du |
+| `~/.config/morgenzeitung/` | `config.toml`, `imap-passwort`, `nextcloud-passwort` | du |
 | `~/.local/share/morgenzeitung/` | `ausgaben/`, `zeit/`, `morgenzeitung.log` | das Programm |
 
 Das ist die übliche Linux-Konvention (XDG): Einstellungen unter `~/.config`, Daten unter

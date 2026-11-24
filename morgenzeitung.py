@@ -401,6 +401,10 @@ def ausgabe_artikel(cfg: dict, abschnitt: str, heute: datetime) -> list[Artikel]
     except Exception as e:                     # Postfach weg? Dann eben die vorhandene Ausgabe
         log.warning("%s: Postfach nicht abrufbar (%s)", ac["name"], e)
     try:
+        ausgabe.nextcloud_abholen(ac)
+    except Exception as e:                     # Nextcloud weg? Dann eben die vorhandene Ausgabe
+        log.warning("%s: Nextcloud nicht abrufbar (%s)", ac["name"], e)
+    try:
         status = Path(ac["ordner"]).expanduser() / "status.json"
         gewaehlt = ausgabe.auswahl_fuer_heute(ac, status, heute.strftime("%Y-%m-%d"))
     except Exception as e:
