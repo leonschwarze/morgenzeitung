@@ -63,7 +63,10 @@ def test_zerlegen(tmp_path):
     assert 1500 <= a["woerter"] <= 1510
     assert "<em>Vorspann</em>" in a["html"]            # Hervorhebung bleibt
     assert "<h2>Zwischentitel</h2>" in a["html"]
-    assert "img" not in a["html"] and "class=" not in a["html"] and "<h1" not in a["html"]
+    assert "<h1" not in a["html"] and 'class="titel"' not in a["html"]
+    # Bild wird Platzhalter mit Unterschrift; die Datei fehlt im Mini-EPUB → keine Daten
+    assert '<figure class="bild"><img src="BILD:0" alt=""/><figcaption>Bild</figcaption></figure>' in a["html"]
+    assert a["bilder_roh"] == [(None, "Bild")]
 
 
 def test_rotation_ueber_die_woche(tmp_path):

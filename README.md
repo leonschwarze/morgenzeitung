@@ -19,6 +19,7 @@ zugänglichen Feeds. Fehlt die SZ an einem Morgen, springt die Tagesschau ein.
 | Datei | Aufgabe |
 |---|---|
 | `morgenzeitung.py` | Nachrichten holen, auswählen, EPUB bauen |
+| `bilder.py` | Fotos in Graustufen umwandeln, verkleinern, Infografiken aussortieren |
 | `layout.py` | Gestaltung: Titelblatt, Inhaltsseite, Artikelseiten, CSS |
 | `ausgabe.py` | fertige Ausgaben (SZ, ZEIT) holen, zerlegen und Artikel nach Ressorts auswählen |
 | `config.toml` | Quellen, Lesezeit, Titel |
@@ -40,6 +41,25 @@ zugänglichen Feeds. Fehlt die SZ an einem Morgen, springt die Tagesschau ein.
 - **Stichwortfilter für den WDR** (`nur_mit`): Der allgemeine WDR-Feed deckt ganz NRW ab. Es
   kommen nur Meldungen durch, deren Titel oder Anriss eines der Stichwörter enthält (Bonn,
   Rhein-Sieg, Landtag, Landesregierung …).
+
+## Bilder, Bildunterschriften, Zitate
+
+Volltext-Artikel bringen ihre Fotos mit – aus Webseiten genauso wie aus der SZ- und ZEIT-Ausgabe.
+
+- **Bildunterschriften:** trafilatura verwirft sie, deshalb sucht `bilder.unterschrift_finden()`
+  sie selbst in der Originalseite: die `<figcaption>` rund um das Bild oder ein Element mit
+  „caption“, „credit“ o. Ä. im Klassennamen. Die Unterschrift zählt nicht zur Lesezeit.
+- **Aufmacherbild:** Viele Seiten stellen das Hauptfoto außerhalb des Artikeltexts dar. Das
+  Programm holt es über das `og:image`-Feld der Seite und setzt es an den Anfang.
+- **Aufbereitung auf dem Pi:** Graustufen, 1000 px breit, einfaches JPEG – aus 3 MB werden
+  ca. 50–100 KB. Eine Ausgabe wächst damit auf etwa 1–4 MB.
+- **Infografiken fliegen raus:** erkannt an Wörtern wie „Grafik“, „Karte“, „Quelle:“ in der
+  Unterschrift oder daran, dass wenige Grauwerte den Großteil der Fläche belegen (bei Fotos
+  verteilen sie sich breit). Mit `infografiken = true` kommen sie doch mit.
+- **Zitatblöcke** werden eingerückt und mit einer Linie links abgesetzt, Listen bleiben Listen.
+
+Bilder werden erst geladen, wenn feststeht, dass ein Artikel in die Zeitung kommt. Einstellungen
+im Abschnitt `[bilder]`.
 
 ## SZ und ZEIT aus den fertigen Ausgaben
 
@@ -109,7 +129,7 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 mkdir -p ~/.config/morgenzeitung
 cp config.example.toml ~/.config/morgenzeitung/config.toml   # dann anpassen
-.venv/bin/python -m pytest -q          # sollte "14 passed" melden
+.venv/bin/python -m pytest -q          # sollte "18 passed" melden
 ```
 
 **Erster Lauf von Hand:**

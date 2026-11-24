@@ -47,6 +47,19 @@ h1 { font-size: 1.55em; line-height: 1.15; margin: 0 0 .45em; font-weight: bold;
 .quelle-link { font-family: sans-serif; font-size: .62em; text-indent: 0; text-align: left;
                margin-top: 1.4em; word-break: break-all; }
 
+/* --- Bilder und Zitate ------------------------------------------------------ */
+figure.bild { margin: 1em 0; padding: 0; text-align: center; page-break-inside: avoid; }
+figure.bild img { max-width: 100%; height: auto; }
+figcaption { font-family: sans-serif; font-size: .7em; line-height: 1.3; text-align: left;
+             margin-top: .35em; padding-bottom: .3em; border-bottom: 1px solid #000; }
+figure.bild + p { text-indent: 0; }
+blockquote { margin: 1em 0 1em .2em; padding: .1em 0 .1em .8em; border-left: 3px solid #000;
+             font-style: italic; font-size: 1.05em; page-break-inside: avoid; }
+blockquote p { text-indent: 0; text-align: left; margin-bottom: .3em; }
+blockquote + p { text-indent: 0; }
+.text ul, .text ol { margin: .6em 0 .6em 1.2em; padding: 0; }
+.text li { margin-bottom: .3em; }
+
 /* --- Titel-/Inhaltsseite ------------------------------------------------- */
 .kopf { text-align: center; margin-top: .4em; }
 .marke { font-size: 2.1em; font-weight: bold; letter-spacing: .06em; text-indent: 0;
@@ -232,6 +245,12 @@ def epub_bauen(cfg: dict, auswahl: list, ziel: Path, heute: datetime) -> Path:
                 text, schluss = text[:-4] + "&#160;■</p>", ""
             else:
                 schluss = '<p class="ende">■</p>'
+            # Bilder als eigene Dateien ins EPUB, Platzhalter BILDNR:n → echter Pfad
+            for n, jpeg in enumerate(getattr(a, "bilder", [])):
+                bildname = f"bilder/q{qi}a{ai}_{n}.jpg"
+                buch.add_item(epub.EpubImage(uid=f"bild_q{qi}a{ai}_{n}", file_name=bildname,
+                                             media_type="image/jpeg", content=jpeg))
+                text = text.replace(f'src="BILDNR:{n}"', f'src="{bildname}"')
             koerper = f'<div class="text">{text}</div>'
             link = f'<p class="quelle-link">{esc(a.url)}</p>' if a.url else ""
             k = seite(datei, a.titel,

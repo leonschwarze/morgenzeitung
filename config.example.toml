@@ -13,6 +13,14 @@ max_alter_stunden = 20       # ältere Feed-Einträge werden ignoriert
 ausgabe_ordner = "~/.local/share/morgenzeitung/ausgaben"
 aufbewahren_tage = 7         # ältere Ausgaben werden gelöscht
 
+[bilder]
+aktiv = true
+max_pro_artikel = 6          # Fotos pro Volltext-Artikel
+max_gesamt = 40              # Obergrenze pro Ausgabe (schont Tolino und Pi)
+breite = 1000                # Pixel; der Tolino zeigt ca. 1000–1200 px in der Breite
+qualitaet = 70               # JPEG-Qualität: 60–80 ist auf E-Ink nicht zu unterscheiden
+infografiken = false         # Diagramme, Karten, Tabellen weglassen
+
 # ---------------------------------------------------------------------------
 # Quellen. Reihenfolge = Reihenfolge in der Zeitung und Priorität beim Auswählen.
 #   artikel       = höchstens so viele Artikel aus dieser Quelle

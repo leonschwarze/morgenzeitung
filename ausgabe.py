@@ -168,38 +168,92 @@ BLOCK = {"p", "h2", "h3", "h4", "li"}
 INLINE = {"em", "strong", "i", "b", "br"}
 
 
-def _saeubern(body) -> str:
-    """Nur Absätze, Zwischenüberschriften und Hervorhebungen behalten – keine
-    Bilder, Klassen oder Skripte. So sieht jeder Longread im Tolino gleich aus
-    wie der Rest der Zeitung."""
-    for el in body.xpath(".//script|.//style|.//img|.//svg|.//figure|.//aside|.//nav|.//h1"):
+def _inline(el) -> str:
+    """Inhalt eines Absatzes mit einfachen Hervorhebungen, ohne Klassen und Attribute."""
+    kopie = deepcopy(el)
+    for unter in list(kopie.iterdescendants()):
+        if not isinstance(unter.tag, str):
+            continue
+        name = etree.QName(unter).localname
+        if name in INLINE:
+            unter.tag = name
+            unter.attrib.clear()
+        else:
+            unter.drop_tag()
+    innen = html.escape(kopie.text or "") + "".join(
+        lh.tostring(k, encoding="unicode", method="xml") for k in kopie)
+    return innen.strip()
+
+
+def _saeubern(body, bild_lesen=None) -> tuple[str, list[tuple[bytes, str]]]:
+    """Behält Absätze, Zwischentitel, Hervorhebungen, Zitatblöcke und Bilder mit
+    Unterschrift – alles in einheitlicher, schlichter Form. So sieht jeder Artikel
+    im Tolino gleich aus wie der Rest der Zeitung.
+
+    bild_lesen(src) liefert die Bilddaten aus dem EPUB (oder None)."""
+    import bilder
+    for el in body.xpath(".//script|.//style|.//svg|.//aside|.//nav|.//h1"):
         el.drop_tree()
+
+    # 1. Bilder durch Platzhalter-Elemente <bild> ersetzen (eins pro Figur)
+    roh = []
+    for img in list(body.iter("img")):
+        if img.getparent() is None:
+            continue
+        figur_el = next((a for a in img.iterancestors() if a.tag == "figure"), None)
+        unterschrift = bilder.unterschrift_finden(img)
+        daten = bild_lesen(img.get("src", "")) if bild_lesen else None
+        if figur_el is None and unterschrift:              # Unterschrift nicht doppelt als Absatz
+            for bereich in (img.getparent(), getattr(img.getparent(), "getparent", lambda: None)()):
+                for c in list(bereich.iter()) if bereich is not None else []:
+                    if (isinstance(c.tag, str) and bilder.UNTERSCHRIFT_KLASSE.search(c.get("class", ""))
+                            and c.getparent() is not None):
+                        c.drop_tree()
+        platz = etree.Element("bild", nr=str(len(roh)))
+        ziel = figur_el if figur_el is not None else img
+        # Liegt das Bild mitten in einem Absatz, kommt es hinter den Absatz
+        block = next((a for a in ziel.iterancestors() if a.tag in BLOCK), None)
+        if block is not None:
+            block.addnext(platz)
+            ziel.drop_tree()
+        else:
+            ziel.addprevious(platz)
+            ziel.drop_tree()
+        roh.append((daten, unterschrift))
+    for rest in body.xpath(".//figure|.//figcaption"):
+        rest.drop_tree()
+
+    # 2. Blöcke in Dokumentreihenfolge einsammeln
     teile = []
     for el in body.iter():
-        if not isinstance(el.tag, str) or etree.QName(el).localname not in BLOCK:
+        if not isinstance(el.tag, str):
             continue
-        if any(isinstance(v.tag, str) and etree.QName(v).localname in BLOCK for v in el.iterancestors()):
+        name = etree.QName(el).localname
+        if name == "bild":
+            nr = int(el.get("nr"))
+            teile.append(bilder.figur(nr, roh[nr][1]))
+            continue
+        if name == "blockquote":
+            absaetze = [_inline(p) for p in el.iter() if isinstance(p.tag, str)
+                        and etree.QName(p).localname == "p"] or [_inline(el)]
+            absaetze = [a for a in absaetze if a]
+            if absaetze:
+                teile.append("<blockquote>" + "".join(f"<p>{a}</p>" for a in absaetze) + "</blockquote>")
+            continue
+        if name not in BLOCK:
+            continue
+        if any(isinstance(v.tag, str) and etree.QName(v).localname in BLOCK | {"blockquote"}
+               for v in el.iterancestors()):
             continue                                      # schon über den Elternblock erfasst
-        kopie = deepcopy(el)
-        for unter in list(kopie.iterdescendants()):
-            if not isinstance(unter.tag, str):
-                continue
-            name = etree.QName(unter).localname
-            if name in INLINE:
-                unter.tag = name
-                unter.attrib.clear()
-            else:
-                unter.drop_tag()
-        innen = html.escape(kopie.text or "") + "".join(
-            lh.tostring(k, encoding="unicode", method="xml") for k in kopie)
-        if innen.strip():
-            tag = "p" if etree.QName(el).localname == "li" else etree.QName(el).localname
-            teile.append(f"<{tag}>{innen.strip()}</{tag}>")
-    return "\n".join(teile)
+        innen = _inline(el)
+        if innen:
+            tag = "p" if name == "li" else name
+            teile.append(f"<{tag}>{innen}</{tag}>")
+    return "\n".join(teile), roh
 
 
 def artikel_lesen(pfad: Path) -> list[dict]:
-    """Zerlegt eine Ausgabe in Artikel: [{id, titel, ressort, html, woerter}, …]"""
+    """Zerlegt eine Ausgabe in Artikel: [{id, titel, ressort, html, woerter, bilder_roh}, …]"""
     with ZipFile(pfad) as zf:
         namen = set(zf.namelist())
         if "META-INF/encryption.xml" in namen and b"font" not in zf.read("META-INF/encryption.xml").lower():
@@ -221,9 +275,16 @@ def artikel_lesen(pfad: Path) -> list[dict]:
             ueberschrift = body.xpath("(.//h1|.//h2)[1]")
             titel, ressort = toc.get(datei, ("", ""))
             titel = titel or (ueberschrift[0].text_content().strip() if ueberschrift else "")
-            text = _saeubern(body)
+            ordner = posixpath.dirname(datei)
+
+            def bild_lesen(src, ordner=ordner):
+                pfad = posixpath.normpath(posixpath.join(ordner, unquote(src.split("#")[0])))
+                return zf.read(pfad) if pfad in namen else None
+
+            text, bilder_roh = _saeubern(body, bild_lesen)
+            woerter = len(re.sub(r"<figcaption>.*?</figcaption>|<[^>]+>", " ", text, flags=re.S).split())
             artikel.append({"id": datei, "titel": re.sub(r"\s+", " ", titel), "ressort": ressort,
-                            "html": text, "woerter": len(re.sub(r"<[^>]+>", " ", text).split())})
+                            "html": text, "woerter": woerter, "bilder_roh": bilder_roh})
     return artikel
 
 

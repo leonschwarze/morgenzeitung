@@ -70,6 +70,8 @@ def lade_config(pfad=None) -> dict:
     z.setdefault("max_alter_stunden", 20)
     z.setdefault("ausgabe_ordner", str(DATEN_ORDNER / "ausgaben"))
     z.setdefault("aufbewahren_tage", 7)
+    import bilder
+    bilder.standard(cfg)
     for q in cfg.get("quelle", []):
         q.setdefault("artikel", 2)
         q.setdefault("modus", "volltext")
@@ -93,6 +95,8 @@ class Artikel:
     autor: str = ""
     ressort: str = ""
     sprache: str = "de"
+    bilder: list = field(default_factory=list)   # fertige JPEGs, im HTML als BILDNR:n referenziert
+    bild_quellen: list = field(default_factory=list)  # [(url, unterschrift)] – noch nicht geladen
     notizen: list = field(default_factory=list)
 
 
@@ -156,27 +160,82 @@ def kandidaten_sammeln(cfg: dict, netz) -> dict[str, list[Artikel]]:
 
 
 # --------------------------------------------------------------------------- 2. Volltext
-def text_extrahieren(roh: bytes, url: str) -> tuple[str, str]:
-    """Gibt (html, autor) zurück. trafilatura wirft Navigation, Werbung,
-    Kommentare usw. weg und lässt nur den eigentlichen Artikel übrig."""
+def text_extrahieren(roh: bytes, url: str) -> tuple[str, str, list[tuple[str, str]]]:
+    """Gibt (html, autor, bilder) zurück. trafilatura wirft Navigation, Werbung,
+    Kommentare usw. weg und lässt nur den eigentlichen Artikel übrig – samt
+    Zwischentiteln, Zitatblöcken, Listen und Bildern.
+
+    Bildunterschriften verwirft trafilatura leider. Deshalb suchen wir sie selbst
+    in der Originalseite: Zu jedem Bild die <figcaption> der umgebenden <figure>.
+    bilder = [(bild_url, unterschrift), …], im HTML stehen Platzhalter BILD:n."""
     import trafilatura
+    from urllib.parse import urljoin
     from lxml import html as lh
-    ergebnis = trafilatura.extract(roh, url=url, output_format="html", include_images=False,
+    import bilder as bm
+    ergebnis = trafilatura.extract(roh, url=url, output_format="html", include_images=True,
                                    include_links=False, include_tables=False,
-                                   include_comments=False, favor_precision=True)
+                                   include_comments=False, include_formatting=True,
+                                   favor_precision=True)
     meta = trafilatura.extract_metadata(roh)
     autor = (meta.author or "") if meta else ""
     if not ergebnis:
-        return "", autor
+        return "", autor, []
+
+    # Originalseite: Bilddatei → Unterschrift (Dateiname als Schlüssel, weil Größen-
+    # Parameter in den Adressen oft abweichen)
+    def schluessel(adresse):
+        return adresse.split("?")[0].rstrip("/").rsplit("/", 1)[-1].lower()
+
+    unterschriften = {}
+    try:
+        original = lh.document_fromstring(roh)
+        for img in original.iter("img"):
+            kandidaten = [img.get(a, "") for a in ("src", "data-src", "data-original")]
+            kandidaten += [t.split()[0] for t in (img.get("srcset") or img.get("data-srcset") or "").split(",") if t.strip()]
+            text = bm.unterschrift_finden(img)
+            for k in kandidaten:
+                if k and text:
+                    unterschriften.setdefault(schluessel(k), text)
+        aufmacher = original.xpath("//meta[@property='og:image']/@content")
+    except Exception:
+        aufmacher = []
+
     body = lh.fromstring(ergebnis).find(".//body")
-    teile = []
+    teile, bildliste = [], []
+
+    def bild_hinzu(adresse):
+        adresse = urljoin(url, adresse)
+        if adresse.startswith("data:") or any(schluessel(adresse) == schluessel(a) for a, _ in bildliste):
+            return None
+        bildliste.append((adresse, unterschriften.get(schluessel(adresse), "")))
+        return bm.figur(len(bildliste) - 1, bildliste[-1][1])
+
+    # Aufmacherbild (og:image) steht oft außerhalb des Artikeltexts – dann kommt es nach vorn
+    im_text = {schluessel(urljoin(url, i.get("src", ""))) for i in body.iter("img")} if body is not None else set()
+    if aufmacher and schluessel(urljoin(url, aufmacher[0])) not in im_text:
+        figur = bild_hinzu(aufmacher[0])
+        if figur:
+            teile.append(figur)
+
     for el in body if body is not None else []:
         if el.tag == "h1":            # Titel setzen wir selbst
             continue
-        if el.tag in ("head",):
-            el.tag = "h3"
+        if el.tag == "img":
+            figur = bild_hinzu(el.get("src", ""))
+            if figur:
+                teile.append(figur)
+            continue
+        for img in el.iter("img"):    # Bild mitten im Absatz → hinter den Absatz
+            figur = bild_hinzu(img.get("src", ""))
+            img.drop_tree()
+            if figur:
+                teile.append(figur)
+        # Manche Seiten wiederholen die Bildunterschrift als Absatz – dann nur einmal
+        if " ".join(el.text_content().split()) in {u for _, u in bildliste if u}:
+            continue
         teile.append(lh.tostring(el, encoding="unicode", method="xml"))
-    return "\n".join(teile), autor
+
+    return "\n".join(teile), autor, bildliste
 
 
 def artikel_holen(art: Artikel, quelle: dict, netz) -> bool:
@@ -195,13 +254,32 @@ def artikel_holen(art: Artikel, quelle: dict, netz) -> bool:
             quelle["_gesperrt"] = quelle.get("_gesperrt", 0) + 1
         log.warning("  ✗ %s (%s)", art.titel[:60], status or e)
         return False
-    art.html, art.autor = text_extrahieren(roh, art.url)
-    art.woerter = woerter_zaehlen(art.html)
+    art.html, art.autor, art.bild_quellen = text_extrahieren(roh, art.url)
+    art.woerter = woerter_zaehlen(re.sub(r"<figcaption>.*?</figcaption>", " ", art.html, flags=re.S))
     if art.woerter < quelle["min_woerter"]:
         log.info("  ✗ %s – nur %d Wörter (Paywall?)", art.titel[:60], art.woerter)
         return False
     log.info("  ✓ %s – %d Wörter", art.titel[:60], art.woerter)
     return True
+
+
+def bilder_laden(art: Artikel, netz, b: dict):
+    """Erst wenn ein Artikel sicher in die Zeitung kommt, werden seine Bilder geladen –
+    so lädt der Pi keine Bilder für Artikel, die am Ende doch nicht reinpassen."""
+    import bilder
+    if not art.bild_quellen:
+        return
+    roh = []
+    for adresse, unterschrift in art.bild_quellen[: b["max_pro_artikel"] + 3]:
+        try:
+            roh.append((netz.holen(adresse), unterschrift))
+        except Exception as e:
+            log.info("    Bild nicht geladen (%s)", e)
+            roh.append((None, unterschrift))
+    roh += [(None, u) for _, u in art.bild_quellen[len(roh):]]   # Rest: Platzhalter entfernen
+    art.html, art.bilder = bilder.einsetzen(art.html, roh, b)
+    if art.bilder:
+        log.info("    %d Bild(er)", len(art.bilder))
 
 
 # --------------------------------------------------------------------------- 3. Auswahl
@@ -240,6 +318,8 @@ def auswaehlen(cfg: dict, kandidaten: dict, netz, budget: int | None = None) -> 
                     break
                 genommen[name].append(art)
                 summe += art.woerter
+                if "bilder" in cfg:
+                    bilder_laden(art, netz, cfg["bilder"])
                 fortschritt = True
                 break
             if summe >= budget:
@@ -321,8 +401,13 @@ def ausgabe_artikel(cfg: dict, abschnitt: str, heute: datetime) -> list[Artikel]
     except Exception as e:
         log.warning("%s: Ausgabe nicht lesbar (%s)", ac["name"], e)
         return []
-    return [Artikel(AUSGABEN[abschnitt], a["titel"], "", None, html=a["html"],
-                    woerter=a["woerter"], ressort=a["ressort"]) for a in gewaehlt]
+    import bilder
+    ergebnis = []
+    for a in gewaehlt:
+        text, jpegs = bilder.einsetzen(a["html"], a.get("bilder_roh", []), cfg["bilder"])
+        ergebnis.append(Artikel(AUSGABEN[abschnitt], a["titel"], "", None, html=text,
+                                woerter=a["woerter"], ressort=a["ressort"], bilder=jpegs))
+    return ergebnis
 
 
 # --------------------------------------------------------------------------- Hauptprogramm
